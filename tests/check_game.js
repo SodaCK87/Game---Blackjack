@@ -1,7 +1,7 @@
 // 牌局流程與結算：用疊好的牌重現每一種結局
 const test = require('node:test');
 const assert = require('node:assert');
-const { createGame } = require('../app/js/core/game.js');
+const { createGame, prefillBet } = require('../app/js/core/game.js');
 const { stackedShoe } = require('./shoe_util');
 
 const noRng = () => { throw new Error('疊牌的牌局不該用到亂數'); };
@@ -54,6 +54,28 @@ test('加倍：賭注加倍、只再拿一張、自動停牌，贏了淨賺兩�
   assert.ok(fin.some(e => e.type === 'dealerBust'));
   assert.deepStrictEqual(settleOf(fin), { type: 'settle', seat: 'p', result: 'win', bet: 200, net: 200 });
   assert.strictEqual(g.state().seats[0].bankroll, 1200);
+});
+
+// 上一條加倍後剛好 21，「到 21 自動停」那條也會讓它停牌，守不住加倍本身的自動停牌
+test('加倍後沒到 21 也自動停牌，不能再要牌', () => {
+  const g = oneSeat(['6', '9', '5', '7', '4', '10']);
+  g.startRound({ p: 100 });
+  const ev = g.act('p', 'double');
+  assert.ok(ev.some(e => e.type === 'stand' && e.seat === 'p' && e.auto));
+  assert.strictEqual(g.state().seats[0].status, 'stood');
+  assert.strictEqual(g.state().phase, 'dealer');
+  assert.deepStrictEqual(g.legal('p'), []);
+  assert.throws(() => g.act('p', 'hit'));
+  assert.deepStrictEqual(settleOf(g.finishRound()), { type: 'settle', seat: 'p', result: 'win', bet: 200, net: 200 });
+});
+
+test('下注列預填的注沿用上一注，但對齊 10 的倍數、不超過籌碼與上限（BJK-02）', () => {
+  assert.strictEqual(prefillBet(500, 15), 10);
+  assert.strictEqual(prefillBet(500, 45), 40);
+  assert.strictEqual(prefillBet(1000, 995), 990);
+  assert.strictEqual(prefillBet(50, 1015), 50);
+  assert.strictEqual(prefillBet(5000, 99999), 1000);
+  assert.strictEqual(prefillBet(500, 5), 0);
 });
 
 test('要過牌就不能加倍；籌碼不夠也不能加倍', () => {

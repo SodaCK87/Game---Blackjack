@@ -65,6 +65,7 @@
     const hud = V.hud.create({
       minBet: BJK.game.DEFAULTS.minBet,
       maxBet: BJK.game.DEFAULTS.maxBet,
+      step: BJK.game.DEFAULTS.step,
       onDeal: bet => director.runRound(bet),
       onReset: () => director.resetBankroll(),
     });

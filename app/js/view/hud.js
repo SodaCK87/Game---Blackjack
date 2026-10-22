@@ -14,7 +14,7 @@
   }
   const pct = x => `${Math.round(x * 100)}%`;
 
-  function create({ minBet, maxBet, onDeal, onReset }) {
+  function create({ minBet, maxBet, step, onDeal, onReset }) {
     const $ = id => document.getElementById(id);
     const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
     $('resetBtn').addEventListener('click', () => onReset());
@@ -72,7 +72,7 @@
         betBar.hidden = m !== 'bet';
         actBar.hidden = m !== 'act';
         brokeBar.hidden = m !== 'broke';
-        if (m === 'bet') bet = Math.min(lastBet, bankroll, maxBet) >= minBet ? Math.min(lastBet, bankroll, maxBet) : 0;
+        if (m === 'bet') bet = BJK.game.prefillBet(lastBet, bankroll, { minBet, maxBet, step });
         if (m === 'act') {
           $('hitBtn').disabled = !legal.includes('hit');
           $('standBtn').disabled = !legal.includes('stand');

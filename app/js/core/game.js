@@ -216,5 +216,14 @@
     return { startRound, legal, act, aiChoice, finishRound, topUp, state, rules: o };
   }
 
-  return { createGame, DEFAULTS };
+  // 下注階段預先填好的注：沿用上一注，但不超過籌碼與上限，還要對齊 step。
+  // 籌碼尾數是 5（拿過 Blackjack）又少於上一注時，沒取整會填出 15，按發牌就被 validateBets 擋下（BJK-02）
+  function prefillBet(lastBet, bankroll, rules) {
+    const o = Object.assign({}, DEFAULTS, rules);
+    const cap = Math.min(lastBet, bankroll, o.maxBet);
+    const bet = cap - (cap % o.step);
+    return bet >= o.minBet ? bet : 0;
+  }
+
+  return { createGame, prefillBet, DEFAULTS };
 });

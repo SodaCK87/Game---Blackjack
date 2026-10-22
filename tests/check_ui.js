@@ -323,3 +323,54 @@ test('陽性對照：拿掉存檔，重新整理後籌碼要判成回到 1,000',
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// BJK-02：照同事的按法打一局（清除、+500、發牌、輪到你就一直要牌），輸到剩 15 之後再按發牌。
+// 牌局種子拿 Date.now()，凍結成 1 才每次都是同一副牌；種子 1 這一局玩家會爆牌輸掉 500
+const LOSE_TO_15 = { ...DESKTOP, init: 'Date.now = () => 1;' };
+const BET_AFTER_LOSS = `(async () => {
+  await BJK.view.stage.dealer.ready; BJK.view.anim.speed = 40;
+  const $ = id => document.getElementById(id), hud = $('hud');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 50) await sleep(50); return ok(); };
+  $('clearBet').click(); document.querySelector('[data-chip="500"]').click(); $('dealBtn').click();
+  for (let i = 0; i < 40; i++) {
+    await until(() => hud.dataset.mode !== 'busy', 15000);
+    if (hud.dataset.mode !== 'act') break;
+    $('hitBtn').click();
+    await until(() => hud.dataset.mode !== 'act', 2000);
+  }
+  const before = { mode: hud.dataset.mode, bank: $('bank').textContent, bet: $('bet').textContent };
+  if (before.bank !== '15') return { before };
+  $('dealBtn').click();
+  const started = await until(() => hud.dataset.mode === 'act' || hud.dataset.mode === 'bet', 8000);
+  return { before, started, mode: hud.dataset.mode };
+})()`;
+async function betAfterLoss(dir) {
+  return withPage(first(), LOSE_TO_15, async page => {
+    await page.goto(url(dir));
+    await page.evaluate(`localStorage.setItem('bjk.save.v1', JSON.stringify({ v: 1, bankrolls: { me: 515 } })); true`);
+    await page.goto(url(dir));
+    return page.evaluate(BET_AFTER_LOSS, 60000);
+  });
+}
+
+test(`${first()}：籌碼剩 15、上一注 500 時，預填的注對齊成 10，按發牌照常開局（BJK-02）`, async () => {
+  const r = await betAfterLoss(APP);
+  assert.strictEqual(r.value.before.bank, '15', `前置不成立，這副牌沒有輸到剩 15（牌局吃亂數的順序改過就換種子）：${JSON.stringify(r.value)}`);
+  assert.deepStrictEqual(r.value.before, { mode: 'bet', bank: '15', bet: '10' });
+  assert.ok(r.value.started, `按發牌後 8 秒還停在 ${r.value.mode}`);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：預填的注改回不取整，剩 15 時按發牌要判成卡住', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'hud.js'), 'BJK.game.prefillBet(lastBet, bankroll, { minBet, maxBet, step })',
+    'Math.min(lastBet, bankroll, maxBet) >= minBet ? Math.min(lastBet, bankroll, maxBet) : 0');
+  try {
+    const r = await betAfterLoss(tmp);
+    assert.deepStrictEqual(r.value.before, { mode: 'bet', bank: '15', bet: '15' });
+    assert.strictEqual(r.value.started, false);
+    assert.ok(r.console.some(l => /不是 10 的倍數/.test(l)), `主控台沒有引擎擲錯的訊息：${JSON.stringify(r.console)}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -57,8 +57,8 @@ function connect(wsUrl) {
   });
 }
 
-// size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2）
-async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn) {
+// size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2）；init：每次載入時比頁面自己的 script 先跑的程式碼
+async function withPage(browser, { size = [1280, 720], mobile = false, init = '' } = {}, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-probe-'));
   const marker = path.basename(dir);
   const args = ['--headless=new', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
@@ -99,6 +99,7 @@ async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn
     await client.send('Page.addScriptToEvaluateOnNewDocument', {
       source: 'window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;',
     });
+    if (init) await client.send('Page.addScriptToEvaluateOnNewDocument', { source: init });
     await client.send('Emulation.setDeviceMetricsOverride', {
       width: size[0], height: size[1], deviceScaleFactor: mobile ? 2 : 1, mobile,
     });

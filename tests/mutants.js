@@ -8,6 +8,8 @@ const MUTANTS = [
   ['Blackjack 改成 1 賠 1', 'app/js/core/game.js', 'blackjack: s.bet * 2.5', 'blackjack: s.bet * 2', 'tests/check_game.js'],
   ['荷官 16 點就停', 'app/js/core/game.js', 'hand.value(dealer.cards).total < 17', 'hand.value(dealer.cards).total < 16', 'tests/check_game.js'],
   ['荷官不偷看底牌', 'app/js/core/game.js', "(up.rank === 'A' || hand.isTen(up.rank)) && hand.value", 'false && hand.value', 'tests/check_game.js'],
+  ['加倍後沒自動停牌（沒到 21 還能要牌）', 'app/js/core/game.js', "} else if (action === 'double' || v.total === 21) {", '} else if (v.total === 21) {', 'tests/check_game.js'],
+  ['預填的注沒對齊 step（BJK-02）', 'app/js/core/game.js', 'const bet = cap - (cap % o.step);', 'const bet = cap;', 'tests/check_game.js'],
   ['加倍沒扣籌碼', 'app/js/core/game.js', 's.bankroll -= s.bet;\n        s.bet *= 2;', 's.bet *= 2;', 'tests/check_simulation.js'],
   ['A+A 對 6 退回要牌', 'app/js/core/strategy.js', "return d === 6 ? dbl('hit') : 'hit';", "return 'hit';", 'tests/check_odds.js'],
   ['軟 18 對 9 改成停','app/js/core/strategy.js', "return d <= 8 ? 'stand' : 'hit';", "return d <= 9 ? 'stand' : 'hit';", 'tests/check_strategy.js'],
