@@ -1,4 +1,4 @@
-// 守荷官的對白泡泡：桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊。
+// 守荷官：對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊；五種表情都只有兩隻手（BJK-01）。
 // 驗不到：表情畫得好不好看（看 node tools/shoot.js <前綴> --dealer 的截圖）。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -75,6 +75,56 @@ test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的�
   try {
     const m = await measure(availableBrowsers()[0], tmp, PHONE);
     assert.ok(overlaps(m.bubble, m.face), `破壞後泡泡仍沒蓋到臉，這條判準沒在分辨：${JSON.stringify(m)}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 發牌時右手舉起來捏著牌，原本垂著的右袖就不能再畫（使用者 2026-10-22 回報「多了一隻手臂」）。
+// 把每種表情的 SVG 畫到畫布上，讀兩個點的不透明度（SVG 座標）：左袖垂下處五種都要有東西，右袖垂下處只有發牌時是空的
+const ARMS = `(async () => {
+  await BJK.view.stage.dealer.ready;
+  const read = mood => new Promise((ok, fail) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = 400; c.height = 520;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 400, 520);
+      const alpha = (x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+      ok({ left: alpha(86, 490), right: alpha(314, 490) });
+    };
+    img.onerror = () => fail(new Error(mood + ' 的 SVG 載不起來'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(BJK.view.dealer.svg(mood));
+  });
+  const out = {};
+  for (const m of Object.keys(BJK.view.dealer.MOODS)) out[m] = await read(m);
+  return out;
+})()`;
+
+async function measureArms(appDir) {
+  const r = await withPage(availableBrowsers()[0], DESKTOP, async page => {
+    await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
+    return page.evaluate(ARMS);
+  });
+  return r.value;
+}
+
+function assertTwoArms(arms) {
+  const why = JSON.stringify(arms);
+  for (const [mood, a] of Object.entries(arms)) {
+    assert.strictEqual(a.left, 255, `${mood}：左袖不見了（量法可能讀錯）：${why}`);
+    assert.strictEqual(a.right, mood === 'deal' ? 0 : 255, mood === 'deal' ? `發牌時右袖還垂著，多一隻手：${why}` : `${mood}：右袖不見了：${why}`);
+  }
+}
+
+test(`${availableBrowsers()[0]}：五種表情都只有兩隻手，發牌時舉起來的右手不再另外垂一隻袖子`, async () => {
+  assertTwoArms(await measureArms(APP));
+});
+
+test('陽性對照：發牌時照樣畫垂著的右袖，要判成多一隻手', async () => {
+  const tmp = brokenCopy([[DEALER_JS, "${mood === 'deal' ? '' : RIGHT_SLEEVE}", '${RIGHT_SLEEVE}']]);
+  try {
+    const arms = await measureArms(tmp);
+    assert.throws(() => assertTwoArms(arms), /多一隻手/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

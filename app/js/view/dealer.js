@@ -76,16 +76,22 @@
       <rect x="341" y="357" width="34" height="52" rx="3" fill="none" stroke="${C.shirt}" stroke-width="2"/></g>
     <circle cx="346" cy="414" r="11" fill="${C.skin}" stroke="${C.ink}" stroke-width="3"/>`;
 
-  const HEAD_PATH = 'M130 118 Q200 66 270 118 L280 196 L272 252 Q258 290 228 304 L172 304 Q142 290 128 252 L120 196 Z';
+  // 右袖（畫面右側）垂著的那一段：發牌時這隻手舉起來了，不能再畫，不然會多出一隻手
+  const TORSO = 'M70 520 L76 404 Q82 356 132 342 L172 332 L228 332 L268 342 Q318 356 324 404 L330 520 Z';
+  const TORSO_ARM_UP = 'M70 520 L76 404 Q82 356 132 342 L172 332 L228 332 L268 342 Q298 350 302 382 L306 520 Z';
+  const RIGHT_SLEEVE = shape('M268 342 Q318 356 324 404 L330 520 L292 520 L288 400 Q284 370 262 350 Z', C.shirtShade) +
+    shape('M324 430 L288 436 L290 452 L325 446 Z', C.garter, 3) + line('M288 380 Q296 450 292 520', C.ink, 4);
+
+  const HEAD_PATH ='M130 118 Q200 66 270 118 L280 196 L272 252 Q258 290 228 304 L172 304 Q142 290 128 252 L120 196 Z';
 
   function svg(mood) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${VB_W * 2}" height="${VB_H * 2}" viewBox="0 0 ${VB_W} ${VB_H}">
       ${shape('M164 296 L236 296 L242 350 L158 350 Z', C.skin, 5)}
       ${shape('M200 300 L236 300 L240 346 L210 346 Z', C.shade)}
-      ${shape('M70 520 L76 404 Q82 356 132 342 L172 332 L228 332 L268 342 Q318 356 324 404 L330 520 Z', C.shirt, 5)}
-      ${shape('M268 342 Q318 356 324 404 L330 520 L292 520 L288 400 Q284 370 262 350 Z', C.shirtShade)}
-      ${shape('M76 430 L112 436 L110 452 L75 446 Z M324 430 L288 436 L290 452 L325 446 Z', C.garter, 3)}
-      ${line('M112 380 Q104 450 108 520 M288 380 Q296 450 292 520', C.ink, 4)}
+      ${shape(mood === 'deal' ? TORSO_ARM_UP : TORSO, C.shirt, 5)}
+      ${mood === 'deal' ? '' : RIGHT_SLEEVE}
+      ${shape('M76 430 L112 436 L110 452 L75 446 Z', C.garter, 3)}
+      ${line('M112 380 Q104 450 108 520', C.ink, 4)}
       ${shape('M112 372 Q118 348 150 342 L200 452 L250 342 Q282 348 288 372 L296 520 L104 520 Z', C.vest, 5)}
       ${line('M122 382 L150 354 L195 446', C.vestHi, 3)}
       <circle cx="200" cy="472" r="4" fill="${C.brass}" stroke="${C.ink}" stroke-width="2"/>
