@@ -329,6 +329,22 @@
       if (bank !== me) fail(`畫面上的籌碼 ${bank} ≠ 引擎 ${me}`);
     }
 
+    // 勝率只用畫面上翻開的牌算（rotation.z === 0），荷官的底牌蓋著就拿不到；不准改成去讀引擎狀態
+    let lastOdds = null;
+    function computeOdds() {
+      const faceUp = list => list.filter(m => m.rotation.z === 0).map(m => m.userData);
+      const seen = [...faceUp(dealerCards), ...[...cards.values()].flatMap(faceUp)];
+      const result = BJK.odds.forHand({
+        hand: cards.get('me').map(m => m.userData),
+        up: dealerCards[0].userData,
+        seen,
+        decks: rules.decks,
+        canDouble: game.legal('me').includes('double'),
+      });
+      lastOdds = { seenCount: seen.length, result };
+      return result;
+    }
+
     async function runRound(playerBet) {
       hud.mode('busy');
       for (const s of game.state().seats) {
@@ -347,8 +363,10 @@
         const id = game.state().turn;
         let action;
         if (id === 'me' && !auto) {
+          hud.showOdds(computeOdds());
           hud.mode('act', game.legal('me'));
           action = await hud.nextAction();
+          hud.showOdds(null);
           hud.mode('busy');
         } else {
           await A.wait(id === 'me' ? 200 : 600);
@@ -408,6 +426,7 @@
     return {
       game, layout, autoplay, runRound, resetBankroll,
       get mismatches() { return mismatches.slice(); },
+      get lastOdds() { return lastOdds; },
       get rounds() { return roundsPlayed; },
     };
   }

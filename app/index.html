@@ -12,7 +12,7 @@
 <div id="bubble" class="bubble" hidden></div>
 <div id="banner" hidden></div>
 <div id="hud" data-mode="bet">
-  <div class="hud-info"><span>籌碼 <b id="bank">0</b></span><span>下注 <b id="bet">0</b></span></div>
+  <div class="hud-info"><span>籌碼 <b id="bank">0</b></span><span>下注 <b id="bet">0</b></span><button id="oddsToggle" class="toggle" aria-pressed="true">勝率提示：開</button></div>
   <div class="hud-bar" id="betBar">
     <button data-chip="10">+10</button>
     <button data-chip="50">+50</button>
@@ -25,9 +25,9 @@
     <button id="resetBtn" class="primary">重新開始（補回 1,000 籌碼）</button>
   </div>
   <div class="hud-bar" id="actBar" hidden>
-    <button id="hitBtn" class="primary">要牌</button>
-    <button id="standBtn" class="primary">停牌</button>
-    <button id="doubleBtn" class="primary">加倍</button>
+    <button id="hitBtn" class="primary">要牌<small class="odds"></small></button>
+    <button id="standBtn" class="primary">停牌<small class="odds"></small></button>
+    <button id="doubleBtn" class="primary">加倍<small class="odds"></small></button>
   </div>
 </div>
 <!-- 一律 classic script、照依賴順序載入：雙擊開啟（file://）時 type="module" 會被擋，守它的是 tests/check_file_protocol.js -->
@@ -36,6 +36,7 @@
 <script src="js/core/hand.js"></script>
 <script src="js/core/shoe.js"></script>
 <script src="js/core/strategy.js"></script>
+<script src="js/core/odds.js"></script>
 <script src="js/core/game.js"></script>
 <script src="js/view/textures.js"></script>
 <script src="js/view/cards.js"></script>

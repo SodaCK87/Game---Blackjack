@@ -188,6 +188,38 @@ html, body {
   visibility: hidden;
 }
 
+/* 勝率提示：動作按鈕下方一行小字；關掉時藏起來 */
+#hud button .odds {
+  display: block;
+  margin-top: 1px;
+  color: #d6f3f4;
+  font-size: 12px;
+}
+
+#hud button .odds:empty,
+#hud[data-odds="off"] button .odds {
+  display: none;
+}
+
+#hud button.toggle {
+  min-width: 0;
+  padding: 3px 10px;
+  border-color: #4e5c64;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+}
+
+#hud button.toggle[aria-pressed="true"] {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+}
+
+.hud-info {
+  align-items: center;
+}
+
 /* 手機：下注列六顆按鈕要擠在一排，否則換行後會超出固定高度的操作列 */
 @media (max-width: 480px) {
   .hud-bar {

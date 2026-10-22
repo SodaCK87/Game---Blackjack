@@ -154,6 +154,59 @@ for (const browser of availableBrowsers()) {
 
 const first = () => availableBrowsers()[0];
 
+// 輪到你時讀勝率提示：按鈕上的字、算的時候用了幾張牌、桌上翻開的有幾張；再按開關看藏不藏得起來
+const ODDS_TURN = MEASURE_TURN.replace(/const rect = el =>[\s\S]*$/, `
+  const cards = []; s.scene.traverse(o => { if (o.userData.kind === 'card') cards.push(o); });
+  const odds = id => { const b = document.getElementById(id); const sm = b.querySelector('.odds');
+    return { text: sm.textContent, shown: getComputedStyle(sm).display !== 'none', disabled: b.disabled, title: b.title }; };
+  const on = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
+  document.getElementById('oddsToggle').click();
+  const off = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
+  return { reached, on, off, seenCount: s.director.lastOdds && s.director.lastOdds.seenCount,
+           faceUp: cards.filter(m => m.rotation.z === 0).length, onTable: cards.length,
+           toggleText: document.getElementById('oddsToggle').textContent,
+           pref: JSON.parse(localStorage.getItem('bjk.prefs.v1') || 'null') };
+})()`);
+
+test(`${first()}：輪到你時每個動作標出勝率，只用翻開的牌算；開關關掉就藏起來、重新整理後還記得`, async () => {
+  const r = await withPage(first(), PHONE, async page => {
+    await page.goto(url(APP));
+    const m = await page.evaluate(ODDS_TURN, 30000);
+    await page.goto(url(APP));
+    const after = await page.evaluate(`(async () => { await BJK.view.stage.dealer.ready;
+      const t = document.getElementById('oddsToggle'); return { pressed: t.getAttribute('aria-pressed'), text: t.textContent }; })()`);
+    return { m, after };
+  });
+  const { m, after } = r.value;
+  const why = JSON.stringify(m);
+  assert.ok(m.reached, '打了 6 局都沒輪到你');
+  for (const k of ['hit', 'stand']) {
+    assert.match(m.on[k].text, /^勝 \d{1,3}%$/, `${k} 沒標勝率：${why}`);
+    assert.ok(m.on[k].shown, why);
+    assert.match(m.on[k].title, /^勝 \d+%・平 \d+%・輸 \d+%$/, why);
+  }
+  if (m.on.double.disabled) assert.strictEqual(m.on.double.text, '', why);
+  else assert.match(m.on.double.text, /^勝 \d{1,3}%$/, why);
+  assert.strictEqual(m.seenCount, m.faceUp, `算勝率用的牌數不等於桌上翻開的牌數：${why}`);
+  assert.strictEqual(m.faceUp, m.onTable - 1, `輪到你時桌上應該只有荷官底牌蓋著：${why}`);
+  assert.ok(['hit', 'stand', 'double'].every(k => !m.off[k].shown), `關掉之後還看得到：${why}`);
+  assert.strictEqual(m.toggleText, '勝率提示：關');
+  assert.deepStrictEqual(m.pref, { odds: false });
+  assert.deepStrictEqual(after, { pressed: 'false', text: '勝率提示：關' });
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：把荷官底牌也算進勝率，要抓到「用的牌比翻開的多」', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'),
+    'const seen = [...faceUp(dealerCards),', 'const seen = [...dealerCards.map(m => m.userData),');
+  try {
+    const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(ODDS_TURN, 30000)));
+    assert.strictEqual(r.value.seenCount, r.value.faceUp + 1, JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // 牌局撞不撞出重疊要看運氣（AI 加了隨機之後，原本「打 4 次總會撞到一次」的對照就失手過），
 // 所以讓位本身另外用一組故意疊在同一點的標籤直接驗，對照也做在這上面
 const STACKED_LABELS = `(async () => {

@@ -80,8 +80,8 @@ for (const browser of browsers) {
 
   // 陽性對照三：core 的載入順序排錯（game.js 搶在 hand.js 前面），要當場紅而不是到第一次發牌才壞
   test(`${browser}：陽性對照——core 載入順序排錯時要分得出來`, async () => {
-    const order = ['hand', 'shoe', 'strategy', 'game'].map(n => `<script src="js/core/${n}.js"></script>`);
-    const tmp = brokenCopy('index.html', order.join('\n'), [order[3], ...order.slice(0, 3)].join('\n'));
+    const order = ['hand', 'shoe', 'strategy', 'odds', 'game'].map(n => `<script src="js/core/${n}.js"></script>`);
+    const tmp = brokenCopy('index.html', order.join('\n'), [order[4], ...order.slice(0, 4)].join('\n'));
     try {
       const r = await openApp(browser, tmp, DESKTOP);
       assert.match(String(r.bjk && r.bjk.core), /^fail/, `預期 core 失敗，實際：${JSON.stringify(r.bjk)}`);

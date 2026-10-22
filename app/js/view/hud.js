@@ -2,10 +2,35 @@
 (function () {
   const V = window.BJK.view;
 
+  // 勝率提示開或關，記在瀏覽器裡（跟籌碼存檔分開放：清掉偏好不該動到籌碼）
+  const PREFS_KEY = 'bjk.prefs.v1';
+  function loadOddsPref() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PREFS_KEY));
+      return p && typeof p.odds === 'boolean' ? p.odds : true;
+    } catch (e) {
+      return true;
+    }
+  }
+  const pct = x => `${Math.round(x * 100)}%`;
+
   function create({ minBet, maxBet, onDeal, onReset }) {
     const $ = id => document.getElementById(id);
     const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
     $('resetBtn').addEventListener('click', () => onReset());
+
+    let oddsOn = loadOddsPref();
+    function applyOddsToggle() {
+      $('oddsToggle').setAttribute('aria-pressed', String(oddsOn));
+      $('oddsToggle').textContent = `勝率提示：${oddsOn ? '開' : '關'}`;
+      $('hud').dataset.odds = oddsOn ? 'on' : 'off';
+    }
+    $('oddsToggle').addEventListener('click', () => {
+      oddsOn = !oddsOn;
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify({ odds: oddsOn })); } catch (e) { /* 存不了就只在這一場有效 */ }
+      applyOddsToggle();
+    });
+    applyOddsToggle();
     let bankroll = 0, bet = 0, inPlay = 0, mode = 'bet', lastBet = minBet, pendingAction = null;
 
     // 下注階段顯示正在疊的籌碼，牌局中顯示這一局實際押在桌上的（加倍後會變兩倍）
@@ -57,6 +82,15 @@
         refresh();
       },
       nextAction() { return new Promise(resolve => { pendingAction = resolve; }); },
+      // o 是 BJK.odds.forHand 的結果；null 清掉。關掉提示時照樣填，只是 CSS 把它藏起來，打開就看得到
+      showOdds(o) {
+        for (const [id, key] of [['hitBtn', 'hit'], ['standBtn', 'stand'], ['doubleBtn', 'double']]) {
+          const r = o && o[key];
+          $(id).querySelector('.odds').textContent = r ? `勝 ${pct(r.win)}` : '';
+          $(id).title = r ? `勝 ${pct(r.win)}・平 ${pct(r.push)}・輸 ${pct(r.lose)}` : '';
+        }
+      },
+      get oddsOn() { return oddsOn; },
       get currentMode() { return mode; },
     };
   }
