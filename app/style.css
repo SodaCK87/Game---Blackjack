@@ -1,6 +1,12 @@
 :root {
   --bg: #212c31;
   --teal: #008080;
+  --teal-dk: #006b6b;
+  --cream: #f7f4ec;
+  --gold: #e0b83a;
+  --red: #b3261e;
+  --font: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+  --hud-h: 112px;
 }
 
 html, body {
@@ -13,7 +19,173 @@ html, body {
 #table {
   display: block;
   width: 100vw;
-  height: 100vh;
+  height: calc(100vh - var(--hud-h));
+}
+
+/* 疊在牌桌上的字：座位名牌、點數、AI 的小對白。位置由 director.js 依 3D 座標投影 */
+#overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font);
+}
+
+.seat-tag, .total, .pop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.seat-tag {
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(33, 44, 49, 0.85);
+  color: var(--cream);
+  font-size: 13px;
+}
+
+.seat-tag b {
+  margin-right: 6px;
+  color: #7fd8da;
+}
+
+.total {
+  min-width: 26px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--teal);
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.total.bust {
+  background: var(--red);
+}
+
+.pop {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--cream);
+  color: var(--bg);
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  animation: pop-up 1.6s ease-out forwards;
+}
+
+.pop.win, .pop.blackjack {
+  border: 2px solid var(--gold);
+}
+
+.pop.lose, .pop.bust {
+  border: 2px solid var(--red);
+}
+
+@keyframes pop-up {
+  0% { opacity: 0; margin-top: 10px; }
+  15% { opacity: 1; margin-top: 0; }
+  75% { opacity: 1; }
+  100% { opacity: 0; margin-top: -30px; }
+}
+
+#banner {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  color: var(--gold);
+  font: bold clamp(40px, 9vw, 96px) / 1 var(--font);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 18px rgba(224, 184, 58, 0.6), 0 4px 0 #6b4f10;
+  pointer-events: none;
+}
+
+#banner[hidden] {
+  display: none;
+}
+
+#banner.show {
+  animation: banner-in 1.4s ease-out forwards;
+}
+
+@keyframes banner-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+  30% { transform: translate(-50%, -50%) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* 下方操作列：高度固定，畫布才不會在換模式時跳動 */
+#hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--hud-h);
+  box-sizing: border-box;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #182126;
+  border-top: 2px solid var(--teal);
+  color: var(--cream);
+  font-family: var(--font);
+}
+
+.hud-info {
+  display: flex;
+  gap: 24px;
+  font-size: 15px;
+}
+
+.hud-info b {
+  color: var(--gold);
+  font-size: 18px;
+}
+
+.hud-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.hud-bar[hidden] {
+  display: none;
+}
+
+#hud button {
+  min-width: 52px;
+  padding: 8px 12px;
+  border: 2px solid var(--teal);
+  border-radius: 10px;
+  background: #22343a;
+  color: var(--cream);
+  font: 15px var(--font);
+  cursor: pointer;
+}
+
+#hud button.primary {
+  background: var(--teal);
+  color: #fff;
+}
+
+#hud button.ghost {
+  border-color: #4e5c64;
+}
+
+#hud button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#hud[data-mode="busy"] .hud-bar {
+  visibility: hidden;
 }
 
 /* 荷官的對白泡泡：位置由 dealer.js 依荷官頭部的螢幕座標算 */

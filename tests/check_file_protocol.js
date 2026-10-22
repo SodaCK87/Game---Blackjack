@@ -36,7 +36,7 @@ function assertHealthy(r, viewport) {
   // 先確認量法：頁面真的拿到要模擬的尺寸，否則後面的框景判斷沒有意義
   assert.deepStrictEqual(r.bjk.scene.viewport, viewport.size, `頁面拿到的視窗尺寸不對\n${why}`);
   assert.strictEqual(r.bjk.scene.seats, 5, why);
-  assert.ok(r.bjk.scene.cards > 0 && r.bjk.scene.chips > 0, why);
+  assert.ok(r.bjk.scene.chips > 0, `籌碼架上沒有籌碼\n${why}`);
   assert.strictEqual(r.bjk.scene.fit, true, `牌桌與荷官沒有整個框進畫面\n${why}`);
   assert.deepStrictEqual(r.bjk.dealer, { loaded: 5, mood: 'idle' }, `荷官五種表情沒有全部載入\n${why}`);
   assert.deepStrictEqual(r.console, [], '頁面不該有任何主控台訊息');

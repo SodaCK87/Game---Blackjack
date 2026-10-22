@@ -45,11 +45,11 @@ function connect(wsUrl) {
     };
     ws.onerror = () => reject(new Error(`連不上 ${wsUrl}`));
     ws.onopen = () => resolve({
-      send(method, params = {}) {
+      send(method, params = {}, timeoutMs = CDP_TIMEOUT_MS) {
         const msgId = ++id;
         const p = new Promise((ok, fail) => pending.set(msgId, { ok, fail }));
         ws.send(JSON.stringify({ id: msgId, method, params }));
-        return withTimeout(p, CDP_TIMEOUT_MS, method);
+        return withTimeout(p, timeoutMs, method);
       },
       on(fn) { listeners.push(fn); },
       close() { try { ws.close(); } catch { /* 已經斷了 */ } },
@@ -105,8 +105,9 @@ async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn
         await client.send('Page.navigate', { url });
         await withTimeout(done, CDP_TIMEOUT_MS, `載入 ${url}`);
       },
-      async evaluate(expression) {
-        const r = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+      // 要等很久的（例如連打好幾局）自己給 timeoutMs，預設 15 秒
+      async evaluate(expression, timeoutMs) {
+        const r = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, timeoutMs);
         if (r.exceptionDetails) throw new Error(`頁面內執行失敗：${r.exceptionDetails.text}`);
         return r.result.value;
       },

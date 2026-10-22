@@ -1,10 +1,10 @@
-// 組場景：牌桌、荷官、燈光、鏡頭，與階段 2 的展示牌局（階段 4 接上規則引擎後換成真的發牌）
+// 組場景：牌桌、荷官、燈光、鏡頭，再交給導演（director.js）把規則引擎接上畫面
 (function () {
   const V = window.BJK && window.BJK.view;
   const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null, core: 'not-run', dealer: null };
-  // 給 tests/check_file_protocol.js 讀的狀態，畫面上不顯示。荷官貼圖是非同步載入，載完會再寫一次
+  // 給 tests/ 的探針讀的狀態，畫面上不顯示。荷官貼圖是非同步載入，載完會再寫一次
   const publish = () => { document.body.dataset.bjk = JSON.stringify(status); };
-  // 階段 4 接上畫面前，先在瀏覽器裡用 core 跑一局全 AI 牌局，確認四支 core 在 classic script 下載得起來、接得上
+  // 先在瀏覽器裡用 core 跑一局全 AI 牌局，確認四支 core 在 classic script 下載得起來、接得上
   try {
     const g = BJK.game.createGame({
       rng: V.rng(99),
@@ -22,6 +22,7 @@
     status.ver = BJK.version.BJK_VER;
 
     const canvas = document.getElementById('table');
+    const hudEl = document.getElementById('hud');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -52,21 +53,29 @@
     fill.position.set(0, 5, 10);
     scene.add(fill);
 
-    dealDemo(T);
-
     const render = () => renderer.render(scene, camera);
+    V.anim.setRender(render);
+    // 畫布從畫面頂端開始，所以畫布座標就是視窗座標
     const project = p => {
       const v = p.clone().project(camera);
-      return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight };
+      return { x: (v.x + 1) / 2 * canvas.clientWidth, y: (1 - v.y) / 2 * canvas.clientHeight };
     };
     const dealer = V.dealer.create({ bubble: document.getElementById('bubble'), project, onChange: render });
     // 站在直邊後面、腰部以下被桌子擋住；籌碼架在它前面
     dealer.mesh.position.set(0, -0.6, -0.6);
     scene.add(dealer.mesh);
-    V.stage = { dealer, render };
+
+    let director = null;
+    const hud = V.hud.create({
+      minBet: BJK.game.DEFAULTS.minBet,
+      maxBet: BJK.game.DEFAULTS.maxBet,
+      onDeal: bet => director.runRound(bet),
+    });
 
     function layout() {
-      const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
+      // 畫布只用操作列上方那一塊，牌桌才不會被按鈕蓋住
+      const w = window.innerWidth, h = window.innerHeight - hudEl.offsetHeight, aspect = w / h;
+      canvas.style.height = `${h}px`;
       renderer.setSize(w, h, false);
       camera.aspect = aspect;
       camera.fov = aspect < 1 ? 55 : 38;
@@ -83,20 +92,23 @@
       camera.lookAt(target);
       fitCamera(camera, tableBox, target, dir);
       status.scene.fit = inView(camera, tableBox, 1);
-      status.scene.viewport = [w, h];
+      status.scene.viewport = [window.innerWidth, window.innerHeight];
       render();
       dealer.placeBubble();
+      if (director) director.layout();
     }
 
-    let cards = 0, chips = 0;
-    scene.traverse(o => { if (o.userData.kind === 'card') cards++; if (o.userData.kind === 'chip') chips++; });
-    status.scene = { seats: T.seats.length, cards, chips, fit: false };
+    let chips = 0;
+    scene.traverse(o => { if (o.userData.kind === 'chip') chips++; });
+    status.scene = { seats: T.seats.length, chips, fit: false };
+    layout();
+    director = V.director.create({ scene, table: T, dealer, project, render, hud });
+    V.stage = { scene, dealer, render, director };
     window.addEventListener('resize', layout);
     layout();
     status.render = 'ok';
     dealer.ready.then(() => {
       status.dealer = { loaded: dealer.loaded, mood: dealer.mood };
-      dealer.say('歡迎光臨，請下注！');
       publish();
     }, e => {
       status.dealer = { error: e.message };
@@ -130,38 +142,5 @@
       if (Math.abs(p.x) > margin || Math.abs(p.y) > margin || p.z < -1 || p.z > 1) return false;
     }
     return true;
-  }
-
-  function placeHand(parent, list, at, rotY) {
-    const n = list.length;
-    list.forEach(([rank, suit, faceUp], i) => {
-      const card = V.cards.make(rank, suit, faceUp !== false);
-      // 往右錯開疊牌、露出左上角的點數；不往圓心推，否則會壓到絨布上的字。每張墊高一點避免穿插閃爍
-      const offset = new THREE.Vector3((i - (n - 1) / 2) * 0.22, 0.006 + i * V.cards.T * 1.5, 0)
-        .applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-      card.position.copy(at).add(offset);
-      card.rotation.y = rotY;
-      parent.add(card);
-    });
-  }
-
-  function dealDemo(T) {
-    const rng = V.rng(7);
-    const hands = {
-      0: [['K', 'S'], ['7', 'H']],
-      1: [['9', 'D'], ['9', 'C']],
-      2: [['A', 'H'], ['Q', 'S']],
-      3: [['5', 'C'], ['6', 'D'], ['8', 'H']],
-    };
-    const bets = { 0: 100, 1: 75, 2: 625, 3: 50 };
-    for (const seat of T.seats) {
-      if (hands[seat.index]) placeHand(T.group, hands[seat.index], seat.hand, seat.rotY);
-      if (bets[seat.index]) {
-        const stack = V.chips.stack(bets[seat.index], rng);
-        stack.position.copy(seat.circle);
-        T.group.add(stack);
-      }
-    }
-    placeHand(T.group, [['10', 'S'], ['4', 'D', false]], T.dealer.hand, T.dealer.rotY);
   }
 })();
