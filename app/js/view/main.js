@@ -1,7 +1,20 @@
 // 組場景：牌桌、燈光、鏡頭，與階段 2 的展示牌局（階段 4 接上規則引擎後換成真的發牌）
 (function () {
   const V = window.BJK && window.BJK.view;
-  const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null };
+  const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null, core: 'not-run' };
+  // 階段 4 接上畫面前，先在瀏覽器裡用 core 跑一局全 AI 牌局，確認四支 core 在 classic script 下載得起來、接得上
+  try {
+    const g = BJK.game.createGame({
+      rng: V.rng(99),
+      seats: ['steady', 'reckless', 'timid'].map(p => ({ id: p, name: p, personality: p, bankroll: 1000 })),
+    });
+    g.startRound({ steady: 50, reckless: 200, timid: 10 });
+    while (g.state().phase === 'player') { const id = g.state().turn; g.act(id, g.aiChoice(id)); }
+    if (g.state().phase === 'dealer') g.finishRound();
+    status.core = g.state().phase === 'idle' ? 'ok' : `stuck: ${g.state().phase}`;
+  } catch (e) {
+    status.core = 'fail: ' + e.message;
+  }
   try {
     status.three = THREE.REVISION;
     status.ver = BJK.version.BJK_VER;

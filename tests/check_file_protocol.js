@@ -28,7 +28,7 @@ async function openApp(browser, appDir, viewport) {
 function assertHealthy(r, viewport) {
   const why = `頁面狀態：${JSON.stringify(r.bjk)}\n主控台：\n${r.console.join('\n')}`;
   assert.ok(r.bjk, `頁面沒有寫出狀態\n${why}`);
-  assert.deepStrictEqual([r.bjk.three, r.bjk.ver, r.bjk.render], [THREE_REV, BJK_VER, 'ok'], why);
+  assert.deepStrictEqual([r.bjk.three, r.bjk.ver, r.bjk.render, r.bjk.core], [THREE_REV, BJK_VER, 'ok', 'ok'], why);
   // 先確認量法：頁面真的拿到要模擬的尺寸，否則後面的框景判斷沒有意義
   assert.deepStrictEqual(r.bjk.scene.viewport, viewport.size, `頁面拿到的視窗尺寸不對\n${why}`);
   assert.strictEqual(r.bjk.scene.seats, 5, why);
@@ -68,6 +68,19 @@ for (const browser of browsers) {
     try {
       const r = await openApp(browser, tmp, DESKTOP);
       assert.strictEqual(r.bjk && r.bjk.three, 'missing', `預期 three 沒載入，實際：${JSON.stringify(r.bjk)}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // 陽性對照三：core 的載入順序排錯（game.js 搶在 hand.js 前面），要當場紅而不是到第一次發牌才壞
+  test(`${browser}：陽性對照——core 載入順序排錯時要分得出來`, async () => {
+    const order = ['hand', 'shoe', 'strategy', 'game'].map(n => `<script src="js/core/${n}.js"></script>`);
+    const tmp = brokenCopy('index.html', order.join('\n'), [order[3], ...order.slice(0, 3)].join('\n'));
+    try {
+      const r = await openApp(browser, tmp, DESKTOP);
+      assert.match(String(r.bjk && r.bjk.core), /^fail/, `預期 core 失敗，實際：${JSON.stringify(r.bjk)}`);
+      assert.ok(r.console.some(l => /載入順序錯/.test(l)), `主控台該有載入順序錯的訊息：\n${r.console.join('\n')}`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
