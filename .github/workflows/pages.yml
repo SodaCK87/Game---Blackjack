@@ -1,0 +1,43 @@
+# 推上 main 就把 app/ 原樣發布到 GitHub Pages；不必開瀏覽器的測試（規則、勝率、three 打包）沒過就不發布。
+# 要開 Edge／Chrome 的探針（用 tests/browser_util.js 的）寫死 Windows 的瀏覽器路徑，只在本機 npm test 跑
+name: 發布網站
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node --test $(grep -L browser_util tests/check_*.js)
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: app
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
