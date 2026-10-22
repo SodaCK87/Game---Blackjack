@@ -1,4 +1,5 @@
-// 探針共用：無頭開 Edge／Chrome 載一個網址，回傳 dump 出來的 DOM 與頁面自己的主控台訊息。
+// 探針共用：無頭開 Edge／Chrome，經 CDP 控制一個分頁（設視窗尺寸、讀頁面狀態、收主控台、截圖）。
+// 不用 --window-size：無頭視窗寬度最小被夾在約 500px，量不到手機（2026-10-22 實測 390 寬得到 496）。
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -8,6 +9,7 @@ const CANDIDATES = {
   edge: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   chrome: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 };
+const CDP_TIMEOUT_MS = 15000;
 
 function availableBrowsers() {
   return Object.keys(CANDIDATES).filter(b => fs.existsSync(CANDIDATES[b]));
@@ -19,38 +21,117 @@ function markedPids(marker) {
   return execFileSync('powershell', ['-NoProfile', '-Command', ps]).toString().split(/\s+/).filter(Boolean);
 }
 
-async function openHeadless(browser, url, { timeoutMs = 30000 } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-probe-'));
-  const args = ['--headless=new', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
-    '--enable-logging=stderr', '--v=0', '--virtual-time-budget=5000', '--dump-dom', url];
-  // Edge 會先把自己重新啟動一次，拿到的 pid 只是 launcher、stdout 也會斷掉
-  if (browser === 'edge') args.unshift('--edge-skip-compat-layer-relaunch');
-  // 不能用 spawnSync：它卡住事件迴圈，同一個行程裡若有 http 伺服器就回不了應
-  const r = await new Promise(resolve => {
-    const p = spawn(CANDIDATES[browser], args);
-    let stdout = '', stderr = '';
-    p.stdout.on('data', d => { stdout += d; });
-    p.stderr.on('data', d => { stderr += d; });
-    const timer = setTimeout(() => p.kill(), timeoutMs);
-    p.on('close', (status, signal) => { clearTimeout(timer); resolve({ stdout, stderr, status, signal }); });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([promise, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`CDP 逾時：${what}`)), ms); })])
+    .finally(() => clearTimeout(timer));
+}
+
+function connect(wsUrl) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    let id = 0;
+    const pending = new Map(), listeners = [];
+    ws.onmessage = ev => {
+      const msg = JSON.parse(ev.data);
+      if (msg.id && pending.has(msg.id)) {
+        const { ok, fail } = pending.get(msg.id);
+        pending.delete(msg.id);
+        msg.error ? fail(new Error(`${msg.error.message}`)) : ok(msg.result);
+      } else if (msg.method) {
+        listeners.forEach(fn => fn(msg));
+      }
+    };
+    ws.onerror = () => reject(new Error(`連不上 ${wsUrl}`));
+    ws.onopen = () => resolve({
+      send(method, params = {}) {
+        const msgId = ++id;
+        const p = new Promise((ok, fail) => pending.set(msgId, { ok, fail }));
+        ws.send(JSON.stringify({ id: msgId, method, params }));
+        return withTimeout(p, CDP_TIMEOUT_MS, method);
+      },
+      on(fn) { listeners.push(fn); },
+      close() { try { ws.close(); } catch { /* 已經斷了 */ } },
+    });
   });
+}
+
+// size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2）
+async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-probe-'));
   const marker = path.basename(dir);
-  let leftover = markedPids(marker);
-  if (leftover.length) {
-    execFileSync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${leftover.join(',')} -Force -ErrorAction SilentlyContinue`]);
-    leftover = markedPids(marker);
+  const args = ['--headless=new', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
+    '--remote-debugging-port=0', 'about:blank'];
+  // Edge 會先把自己重新啟動一次，拿到的 pid 只是 launcher
+  if (browser === 'edge') args.unshift('--edge-skip-compat-layer-relaunch');
+  const proc = spawn(CANDIDATES[browser], args, { stdio: 'ignore' });
+  let client = null;
+  const result = { console: [], leftover: -1 };
+  try {
+    const portFile = path.join(dir, 'DevToolsActivePort');
+    for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await sleep(100);
+    const port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0];
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const pageTarget = targets.find(t => t.type === 'page');
+    client = await connect(pageTarget.webSocketDebuggerUrl);
+    client.on(msg => {
+      if (msg.method === 'Runtime.consoleAPICalled') {
+        result.console.push(`${msg.params.type}: ${msg.params.args.map(a => a.value ?? a.description).join(' ')}`);
+      } else if (msg.method === 'Runtime.exceptionThrown') {
+        const d = msg.params.exceptionDetails;
+        result.console.push(`exception: ${d.exception ? d.exception.description : d.text}`);
+      } else if (msg.method === 'Log.entryAdded') {
+        result.console.push(`${msg.params.entry.level}: ${msg.params.entry.text}`);
+      }
+    });
+    await client.send('Runtime.enable');
+    await client.send('Log.enable');
+    await client.send('Page.enable');
+    // alert／confirm 會卡住 renderer，CDP 回應就送不出來，探針會整支掛住
+    await client.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: 'window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;',
+    });
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: size[0], height: size[1], deviceScaleFactor: mobile ? 2 : 1, mobile,
+    });
+    if (mobile) await client.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+
+    const page = {
+      async goto(url) {
+        let loaded;
+        const done = new Promise(r => { loaded = r; });
+        client.on(msg => { if (msg.method === 'Page.loadEventFired') loaded(); });
+        await client.send('Page.navigate', { url });
+        await withTimeout(done, CDP_TIMEOUT_MS, `載入 ${url}`);
+      },
+      async evaluate(expression) {
+        const r = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+        if (r.exceptionDetails) throw new Error(`頁面內執行失敗：${r.exceptionDetails.text}`);
+        return r.result.value;
+      },
+      async screenshot(file) {
+        const r = await client.send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
+      },
+      console: result.console,
+    };
+    result.value = await fn(page);
+  } finally {
+    if (client) {
+      try { await client.send('Browser.close'); } catch { /* 已經關了 */ }
+      client.close();
+    }
+    for (let i = 0; i < 50 && proc.exitCode === null; i++) await sleep(100);
+    let left = markedPids(marker);
+    if (left.length) {
+      execFileSync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${left.join(',')} -Force -ErrorAction SilentlyContinue`]);
+      left = markedPids(marker);
+    }
+    result.leftover = left.length;
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 進程剛收完，偶爾還鎖著 */ }
   }
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 進程剛收完，偶爾還鎖著 */ }
-  // Edge 內建擴充也會寫主控台，只留頁面本身（file:// 或 http://127.0.0.1）來源的訊息
-  const pageConsole = r.stderr.split(/\r?\n/)
-    .filter(l => /:CONSOLE[:(]/.test(l) && /(file:\/\/\/|http:\/\/127\.0\.0\.1)/.test(l));
-  return { dom: r.stdout, pageConsole, status: r.status, signal: r.signal, leftover: leftover.length };
+  return result;
 }
 
-function readBjkStatus(dom) {
-  const m = dom.match(/data-bjk="([^"]*)"/);
-  if (!m) return null;
-  return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
-}
-
-module.exports = { availableBrowsers, openHeadless, readBjkStatus };
+module.exports = { availableBrowsers, withPage };

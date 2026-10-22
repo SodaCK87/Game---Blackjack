@@ -9,5 +9,7 @@
 3. `app\js\core\` 是純邏輯：不准引用 `app\js\view\`、不准碰 DOM／Three.js／計時器、不准直接呼叫 `Math.random`。亂數由呼叫端傳入，探針才重現得了同一副牌；動畫要等的東西一律在 view 層等。每支 core 檔的外殼照 `app\js\core\version.js`：瀏覽器掛到 `window.BJK.<名稱>`，node 走 `module.exports`。
 4. `app\` 一律 classic script，不准 `type="module"`、`import`／`export`。2026-10-22 實測 Edge 與 Chrome 在 file:// 下 ES module 被 CORS 擋（同一頁走 http 正常），同事雙擊會一片空白。Three.js 因此由 `npm run build:three` 打包成全域 `THREE` 的 `app\lib\three.js`，不准手改。
 5. 驗證一律 `npm test`（＝`node --test "tests/check_*.js"`；node 24 的 `--test` 給目錄會失敗，要給 glob）。剛 clone 先 `npm ci`。會開無頭 Edge／Chrome，不搶焦點。
+   1. 看畫面用 `node tools/shoot.js <前綴>`，桌機 1280×720 與手機 390×844 各一張，落在 `tools\_shots\`。
+   2. 模擬手機尺寸一律走 `tests\browser_util.js` 的 CDP，不要用 `--window-size`：無頭視窗寬度最小被夾在約 500px，要 390 實得 496，截圖只截到左半邊而判準照樣綠。
 6. 這是公開 repo：不准放任何工地資料、同事真名或照片。AI 同桌的名字用虛構的。
 7. 籌碼只是遊戲點數：畫面與文件不出現「元」「NT$」這類真錢字眼。

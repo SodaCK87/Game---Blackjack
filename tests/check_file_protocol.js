@@ -1,47 +1,85 @@
-// 守「同事雙擊 app/index.html 就能玩」：file:// 下 three、core、view 都要載得起來、畫得出圖。
-// 驗不到：真 GPU 的效能、使用者機器上的瀏覽器版本差異（這裡用的是本機裝的 Edge／Chrome）。
+// 守「同事雙擊 app/index.html 就能玩」：file:// 下 three、core、view 都要載得起來、畫得出圖，
+// 而且桌機與手機尺寸都要把整張牌桌框進畫面。
+// 驗不到：真 GPU 的效能、真手機（這裡是 CDP 模擬的手機尺寸）、使用者電腦上的瀏覽器版本差異。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { availableBrowsers, openHeadless, readBjkStatus } = require('./browser_util');
+const { availableBrowsers, withPage } = require('./browser_util');
 
 const APP = path.join(__dirname, '..', 'app');
 const PKG = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 const { BJK_VER } = require('../app/js/core/version.js');
-const EXPECTED = { three: PKG.devDependencies.three.split('.')[1], ver: BJK_VER, render: 'ok' };
+const THREE_REV = PKG.devDependencies.three.split('.')[1];
+const DESKTOP = { size: [1280, 720], mobile: false };
+const PHONE = { size: [390, 844], mobile: true };
 
-async function openApp(browser, appDir) {
-  const r = await openHeadless(browser, pathToFileURL(path.join(appDir, 'index.html')).href);
-  return { ...r, bjk: readBjkStatus(r.dom) };
+async function openApp(browser, appDir, viewport) {
+  const r = await withPage(browser, viewport, async page => {
+    await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
+    const raw = await page.evaluate('document.body.dataset.bjk || null');
+    return raw ? JSON.parse(raw) : null;
+  });
+  return { bjk: r.value, console: r.console, leftover: r.leftover };
+}
+
+function assertHealthy(r, viewport) {
+  const why = `頁面狀態：${JSON.stringify(r.bjk)}\n主控台：\n${r.console.join('\n')}`;
+  assert.ok(r.bjk, `頁面沒有寫出狀態\n${why}`);
+  assert.deepStrictEqual([r.bjk.three, r.bjk.ver, r.bjk.render], [THREE_REV, BJK_VER, 'ok'], why);
+  // 先確認量法：頁面真的拿到要模擬的尺寸，否則後面的框景判斷沒有意義
+  assert.deepStrictEqual(r.bjk.scene.viewport, viewport.size, `頁面拿到的視窗尺寸不對\n${why}`);
+  assert.strictEqual(r.bjk.scene.seats, 5, why);
+  assert.ok(r.bjk.scene.cards > 0 && r.bjk.scene.chips > 0, why);
+  assert.strictEqual(r.bjk.scene.fit, true, `牌桌沒有整張框進畫面\n${why}`);
+  assert.deepStrictEqual(r.console, [], '頁面不該有任何主控台訊息');
+  assert.strictEqual(r.leftover, 0, '無頭瀏覽器的進程沒收乾淨');
+}
+
+// 在暫存複本上改一個檔，回傳複本路徑；替換沒命中就直接紅，免得「破壞沒生效」被當成對照通過
+function brokenCopy(file, from, to) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-app-'));
+  fs.cpSync(APP, tmp, { recursive: true });
+  const target = path.join(tmp, file);
+  const before = fs.readFileSync(target, 'utf8');
+  const after = before.replace(from, to);
+  assert.notStrictEqual(after, before, `破壞沒有命中：${file} 裡找不到 ${from}`);
+  fs.writeFileSync(target, after);
+  return tmp;
 }
 
 const browsers = availableBrowsers();
 test('本機至少有一支瀏覽器可以驗', () => assert.ok(browsers.length > 0, '找不到 Edge 或 Chrome'));
 
 for (const browser of browsers) {
-  test(`${browser}：雙擊開 index.html，three r${EXPECTED.three}、core ${BJK_VER} 都載入且畫得出圖`, async () => {
-    const r = await openApp(browser, APP);
-    assert.deepStrictEqual(r.bjk, EXPECTED, `頁面狀態不對；主控台：\n${r.pageConsole.join('\n')}`);
-    assert.deepStrictEqual(r.pageConsole, [], '頁面不該有任何主控台訊息');
-    assert.strictEqual(r.leftover, 0, '無頭瀏覽器的進程沒收乾淨');
+  test(`${browser}：桌機尺寸雙擊開 index.html，載入、繪圖、框景都正常`, async () => {
+    assertHealthy(await openApp(browser, APP, DESKTOP), DESKTOP);
   });
 
-  // 陽性對照：把 three 改成 type="module" 載入（最可能的「現代化」改法），上一條要分得出來
-  test(`${browser}：陽性對照——three 改用 type="module" 載入時，同一套判準要變紅`, async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-app-'));
+  test(`${browser}：手機直式尺寸（390×844）也把整張牌桌框進畫面`, async () => {
+    assertHealthy(await openApp(browser, APP, PHONE), PHONE);
+  });
+
+  // 陽性對照一：把 three 改成 type="module" 載入（最可能的「現代化」改法）
+  test(`${browser}：陽性對照——three 改用 type="module" 載入時要分得出來`, async () => {
+    const tmp = brokenCopy('index.html', '<script src="lib/three.js">', '<script type="module" src="lib/three.js">');
     try {
-      fs.cpSync(APP, tmp, { recursive: true });
-      const html = path.join(tmp, 'index.html');
-      const before = fs.readFileSync(html, 'utf8');
-      const after = before.replace('<script src="lib/three.js">', '<script type="module" src="lib/three.js">');
-      assert.notStrictEqual(after, before, '破壞沒有命中：index.html 裡找不到 three 的 script 標籤');
-      fs.writeFileSync(html, after);
-      const r = await openApp(browser, tmp);
-      assert.notDeepStrictEqual(r.bjk, EXPECTED, '破壞之後判準仍是綠的，這套判準分辨不出 three 沒載入');
+      const r = await openApp(browser, tmp, DESKTOP);
       assert.strictEqual(r.bjk && r.bjk.three, 'missing', `預期 three 沒載入，實際：${JSON.stringify(r.bjk)}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // 陽性對照二：拿掉自動框景，手機尺寸下牌桌會被切掉，fit 要變 false
+  test(`${browser}：陽性對照——拿掉自動框景時，手機尺寸要判成沒框進畫面`, async () => {
+    const tmp = brokenCopy(path.join('js', 'view', 'main.js'), 'fitCamera(camera, tableBox, target, dir);', '');
+    try {
+      const r = await openApp(browser, tmp, PHONE);
+      assert.strictEqual(r.bjk && r.bjk.render, 'ok', `破壞後頁面應該照樣畫得出來：${JSON.stringify(r.bjk)}`);
+      assert.strictEqual(r.bjk.scene.fit, false, '拿掉框景後仍判成框進畫面，這條判準分辨不出牌桌被切掉');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
