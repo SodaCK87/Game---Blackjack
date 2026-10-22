@@ -29,18 +29,13 @@
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x212c31);
+    scene.background = new THREE.Color(V.room.VOID);
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
 
     const T = V.table.build();
     scene.add(T.group);
-
-    // 地板要夠大：直式螢幕鏡頭往上平移後，60×60 的遠端邊緣會在畫面頂端露出一條背景色
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x1a2327, roughness: 1 }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.82;
-    floor.receiveShadow = true;
-    scene.add(floor);
+    const room = V.room.build();
+    scene.add(room.group);
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.0));
     const lamp = new THREE.SpotLight(0xfff1dc, 220, 30, 0.75, 0.5, 2);
@@ -97,6 +92,7 @@
       fitCamera(camera, tableBox, target, dir);
       alignBottom(camera, tableBox, target);
       status.scene.fit = inView(camera, tableBox, 1);
+      status.scene.wallTop = room.layout(camera, h);
       status.scene.viewport = [window.innerWidth, window.innerHeight];
       render();
       dealer.placeBubble();
@@ -108,7 +104,7 @@
     status.scene = { seats: T.seats.length, chips, fit: false };
     layout();
     director = V.director.create({ scene, table: T, dealer, project, render, hud });
-    V.stage = { scene, dealer, render, director };
+    V.stage = { scene, camera, renderer, room, dealer, render, director };
     window.addEventListener('resize', layout);
     layout();
     status.render = 'ok';

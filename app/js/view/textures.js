@@ -1,4 +1,4 @@
-// 絨布、牌面、牌背、籌碼的貼圖都用 canvas 現畫：不帶外部圖檔，公開 repo 也就沒有素材授權的問題
+// 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 現畫：不帶外部圖檔，公開 repo 也就沒有素材授權的問題
 (function () {
   const BJK = (window.BJK = window.BJK || {});
   const V = (BJK.view = BJK.view || {});
@@ -220,6 +220,68 @@
     return toTexture(c);
   }
 
+  // ---- 佈景（room.js）：使用者要求整體壓暗，花紋只比底色亮一點點 ----
+  // 地毯一格：四邊的圖案對得上，鋪滿地板看不出接縫
+  function carpet() {
+    const S = 512, c = canvas(S, S), ctx = c.getContext('2d');
+    ctx.fillStyle = '#1b1115'; ctx.fillRect(0, 0, S, S);
+    ctx.strokeStyle = 'rgba(201,162,39,0.09)'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(S / 2, 0); ctx.lineTo(S, S / 2); ctx.lineTo(S / 2, S); ctx.lineTo(0, S / 2); ctx.closePath(); ctx.stroke();
+    for (const [x, y] of [[0, 0], [S, 0], [0, S], [S, S], [S / 2, S / 2]]) {
+      ctx.beginPath(); ctx.arc(x, y, 64, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(0,128,128,0.16)'; ctx.lineWidth = 8; ctx.stroke();
+      ctx.fillStyle = 'rgba(201,162,39,0.11)';
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4;
+        ctx.beginPath(); ctx.ellipse(x + 34 * Math.cos(a), y + 34 * Math.sin(a), 14, 6, a, 0, 2 * Math.PI); ctx.fill();
+      }
+    }
+    const rng = V.rng(7);
+    ctx.fillStyle = 'rgba(179,38,30,0.13)';
+    for (let i = 0; i < 40; i++) { ctx.beginPath(); ctx.arc(rng() * S, rng() * S, 3 + rng() * 4, 0, 2 * Math.PI); ctx.fill(); }
+    const t = toTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+
+  // 隔間木牆板一段：兩塊凸起的鑲板，左右接起來是連續的
+  function woodPanel() {
+    const W = 1024, H = 320, c = canvas(W, H), ctx = c.getContext('2d');
+    ctx.fillStyle = '#2e1c13'; ctx.fillRect(0, 0, W, H);
+    const rng = V.rng(11);
+    for (let i = 0; i < 160; i++) {
+      ctx.strokeStyle = `rgba(${rng() < 0.5 ? '0,0,0' : '120,80,50'},${0.08 + rng() * 0.1})`;
+      ctx.lineWidth = 1 + rng() * 2;
+      const x = rng() * W;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.bezierCurveTo(x + 6, H / 3, x - 6, 2 * H / 3, x + rng() * 8 - 4, H); ctx.stroke();
+    }
+    for (const x0 of [32, W / 2 + 32]) {
+      const w = W / 2 - 64, y0 = 48, h = H - 104;
+      ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(x0, y0, w, h);
+      ctx.fillStyle = 'rgba(255,214,170,0.07)'; ctx.fillRect(x0 + 10, y0 + 10, w - 20, h - 20);
+      ctx.strokeStyle = 'rgba(255,214,170,0.10)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x0, y0 + h); ctx.lineTo(x0, y0); ctx.lineTo(x0 + w, y0); ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath(); ctx.moveTo(x0 + w, y0); ctx.lineTo(x0 + w, y0 + h); ctx.lineTo(x0, y0 + h); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, H - 28, W, 28);
+    const t = toTexture(c);
+    t.wrapS = THREE.RepeatWrapping;
+    return t;
+  }
+
+  // 失焦光點：邊緣稍亮的圓盤，白色，顏色由 SpriteMaterial 上色
+  function bokeh() {
+    const S = 128, c = canvas(S, S), ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.78, 'rgba(255,255,255,0.7)');
+    g.addColorStop(0.9, 'rgba(255,255,255,0.95)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    return toTexture(c);
+  }
+
   const cache = new Map();
   function cached(key, make) {
     if (!cache.has(key)) cache.set(key, make());
@@ -232,5 +294,8 @@
     cardBack: () => cached('back', cardBack),
     chipSide: value => cached(`side-${value}`, () => chipSide(value)),
     chipTop: value => cached(`top-${value}`, () => chipTop(value)),
+    carpet: () => cached('carpet', carpet),
+    woodPanel: () => cached('woodPanel', woodPanel),
+    bokeh: () => cached('bokeh', bokeh),
   };
 })();
