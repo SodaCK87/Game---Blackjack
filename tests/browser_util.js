@@ -87,7 +87,9 @@ async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn
         const d = msg.params.exceptionDetails;
         result.console.push(`exception: ${d.exception ? d.exception.description : d.text}`);
       } else if (msg.method === 'Log.entryAdded') {
-        result.console.push(`${msg.params.entry.level}: ${msg.params.entry.text}`);
+        // 載入失敗的訊息本身不帶網址（「404」而已），網址在 entry.url
+        const { level, text, url } = msg.params.entry;
+        result.console.push(`${level}: ${text}${url ? `（${url}）` : ''}`);
       }
     });
     await client.send('Runtime.enable');
