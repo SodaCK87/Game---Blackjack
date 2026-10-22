@@ -18,6 +18,7 @@ const MUTANTS = [
   ['勝率沒排除荷官 Blackjack（偷看過的底牌照樣可能是 10 點牌）', 'app/js/core/odds.js', 'const holeExclude = upValue === 1 ? 10 : upValue === 10 ? 1 : 0;', 'const holeExclude = 0;', 'tests/check_odds.js'],
   ['勝率沒扣掉亮出的牌', 'app/js/core/odds.js', 'for (const c of seen) counts[hand.rankValue(c.rank)]--;', '', 'tests/check_odds.js'],
   ['勝率的荷官軟 17 改成要牌', 'app/js/core/odds.js', 'if (t >= 17) return { [t]: 1 };', 'if (t >= 18 || (t === 17 && !(ace && hard + 10 === 17))) return { [t]: 1 };', 'tests/check_odds.js'],
+  ['建議沒把加倍的期望值算兩倍', 'app/js/core/odds.js', 'result.ev.double = 2 * ev(result.double);', 'result.ev.double = ev(result.double);', 'tests/check_odds.js'],
   ['膽小型偶爾也加倍', 'app/js/core/strategy.js', "if (t <= 11) return 'hit';\n    if (t === 12)", "if (t <= 11) return canDouble && chance(rng, 0.2) ? 'double' : 'hit';\n    if (t === 12)", 'tests/check_strategy.js'],
 ];
 for (const [name, file, from, to, testFile] of MUTANTS) {

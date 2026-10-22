@@ -82,12 +82,14 @@
         refresh();
       },
       nextAction() { return new Promise(resolve => { pendingAction = resolve; }); },
-      // o 是 BJK.odds.forHand 的結果；null 清掉。關掉提示時照樣填，只是 CSS 把它藏起來，打開就看得到
+      // o 是 BJK.odds.forHand 的結果；null 清掉。關掉提示時照樣填，只是 CSS 把它藏起來，打開就看得到。
+      // 平手一起寫：只寫勝的話，18 點對 8 這種平手很多的牌，停牌看起來會比實際差
       showOdds(o) {
         for (const [id, key] of [['hitBtn', 'hit'], ['standBtn', 'stand'], ['doubleBtn', 'double']]) {
           const r = o && o[key];
-          $(id).querySelector('.odds').textContent = r ? `勝 ${pct(r.win)}` : '';
+          $(id).querySelector('.odds').textContent = r ? `勝 ${pct(r.win)}・平 ${pct(r.push)}` : '';
           $(id).title = r ? `勝 ${pct(r.win)}・平 ${pct(r.push)}・輸 ${pct(r.lose)}` : '';
+          $(id).classList.toggle('best', !!(r && o.best === key));
         }
       },
       get oddsOn() { return oddsOn; },

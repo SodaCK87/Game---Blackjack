@@ -110,3 +110,39 @@ test('與真實抽牌的模擬比對：每個選項的勝、平、輸都差不�
   // 誤差照實印出來：模擬本身的抽樣誤差約 ±0.4%（六萬局、兩個標準差），超過的部分才是近似造成的
   t.diagnostic(`最大差距 ${(worst.err * 100).toFixed(2)}%（${worst.where}：計算 ${(worst.calc * 100).toFixed(2)}%、模擬 ${(worst.sim * 100).toFixed(2)}%）`);
 });
+
+// ---- 「建議」：期望值最高的動作 ----
+const { basic } = require('../app/js/core/strategy.js');
+const fresh = (hand, up) => forHand({ hand, up, seen: [...hand, up], canDouble: true });
+
+test('建議挑期望值最高的那個，加倍的期望值算兩倍', () => {
+  const o = fresh([c('5'), c('6', 'H')], c('6', 'D'));
+  assert.strictEqual(o.best, 'double');
+  assert.ok(Math.abs(o.ev.double - 2 * (o.double.win - o.double.lose)) < 1e-12);
+  assert.strictEqual(fresh([c('K'), c('Q', 'H')], c('6', 'D')).best, 'stand');
+  assert.strictEqual(fresh([c('2'), c('3', 'H')], c('7', 'D')).best, 'hit');
+  for (const k of ['stand', 'hit', 'double']) assert.ok(o.ev[o.best] >= o.ev[k]);
+});
+
+// 2026-10-22 量到 540 格只有 1 格不一致（A+A 對 6：表要牌、算加倍——公開的表在這格是分牌，
+// 這個遊戲不能分牌，strategy.js 退回要牌；不能分牌時加倍確實比較好）。門檻定 99%：最多容 5 格
+test('建議與公開的基本策略表對照：兩張牌的每一種組合對每一種明牌，至少 99% 一致', t => {
+  const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+  let same = 0, total = 0;
+  const diff = [];
+  for (let i = 0; i < RANKS.length; i++) {
+    for (let j = i; j < RANKS.length; j++) {
+      const hand = [c(RANKS[i]), c(RANKS[j], 'H')];
+      if (value(hand).total === 21) continue;
+      for (const u of RANKS) {
+        const up = c(u, 'D');
+        const want = basic(hand, up, true), got = fresh(hand, up).best;
+        total++;
+        if (want === got) same++;
+        else diff.push(`${RANKS[i]}+${RANKS[j]} 對 ${u}：表 ${want}、算 ${got}`);
+      }
+    }
+  }
+  t.diagnostic(`${total} 格一致 ${same} 格（${(same / total * 100).toFixed(1)}%）；不一致：${diff.join('；') || '無'}`);
+  assert.ok(same / total >= 0.99, `一致率 ${(same / total * 100).toFixed(1)}%：${diff.slice(0, 10).join('；')}`);
+});

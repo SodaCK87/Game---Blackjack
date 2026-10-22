@@ -201,6 +201,33 @@ html, body {
   display: none;
 }
 
+/* 期望值最好的那顆：金框加右上角「建議」小牌 */
+#hud button.best {
+  position: relative;
+  box-shadow: 0 0 0 2px var(--gold);
+}
+
+#hud button.best::after {
+  content: "建議";
+  position: absolute;
+  top: -10px;
+  right: -6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--bg);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+#hud[data-odds="off"] button.best {
+  box-shadow: none;
+}
+
+#hud[data-odds="off"] button.best::after {
+  display: none;
+}
+
 #hud button.toggle {
   min-width: 0;
   padding: 3px 10px;

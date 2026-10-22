@@ -120,6 +120,10 @@
       }
       result.double = mix(parts);
     }
+    // 建議：每押一單位的期望值最高的那個。加倍押兩倍，期望值也是兩倍；一樣高時照停牌、要牌、加倍的順序取前面的
+    result.ev = { stand: ev(result.stand), hit: ev(result.hit) };
+    if (result.double) result.ev.double = 2 * ev(result.double);
+    result.best = Object.keys(result.ev).reduce((a, k) => (result.ev[k] > result.ev[a] + 1e-12 ? k : a), 'stand');
     return result;
   }
 

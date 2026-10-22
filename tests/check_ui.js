@@ -158,11 +158,13 @@ const first = () => availableBrowsers()[0];
 const ODDS_TURN = MEASURE_TURN.replace(/const rect = el =>[\s\S]*$/, `
   const cards = []; s.scene.traverse(o => { if (o.userData.kind === 'card') cards.push(o); });
   const odds = id => { const b = document.getElementById(id); const sm = b.querySelector('.odds');
-    return { text: sm.textContent, shown: getComputedStyle(sm).display !== 'none', disabled: b.disabled, title: b.title }; };
+    return { text: sm.textContent, shown: getComputedStyle(sm).display !== 'none', disabled: b.disabled, title: b.title,
+             best: b.classList.contains('best'), badge: getComputedStyle(b, '::after').display !== 'none' && getComputedStyle(b, '::after').content === '"建議"' }; };
   const on = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
   document.getElementById('oddsToggle').click();
   const off = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
   return { reached, on, off, seenCount: s.director.lastOdds && s.director.lastOdds.seenCount,
+           calcBest: s.director.lastOdds && s.director.lastOdds.result.best,
            faceUp: cards.filter(m => m.rotation.z === 0).length, onTable: cards.length,
            toggleText: document.getElementById('oddsToggle').textContent,
            pref: JSON.parse(localStorage.getItem('bjk.prefs.v1') || 'null') };
@@ -181,12 +183,17 @@ test(`${first()}：輪到你時每個動作標出勝率，只用翻開的牌算�
   const why = JSON.stringify(m);
   assert.ok(m.reached, '打了 6 局都沒輪到你');
   for (const k of ['hit', 'stand']) {
-    assert.match(m.on[k].text, /^勝 \d{1,3}%$/, `${k} 沒標勝率：${why}`);
+    assert.match(m.on[k].text, /^勝 \d{1,3}%・平 \d{1,3}%$/, `${k} 沒標勝率與平手：${why}`);
     assert.ok(m.on[k].shown, why);
     assert.match(m.on[k].title, /^勝 \d+%・平 \d+%・輸 \d+%$/, why);
   }
   if (m.on.double.disabled) assert.strictEqual(m.on.double.text, '', why);
-  else assert.match(m.on.double.text, /^勝 \d{1,3}%$/, why);
+  else assert.match(m.on.double.text, /^勝 \d{1,3}%・平 \d{1,3}%$/, why);
+  // 建議：剛好一顆、就是計算結果挑的那顆、看得到「建議」小牌；關掉提示後小牌也藏起來
+  const marked = ['hit', 'stand', 'double'].filter(k => m.on[k].best);
+  assert.deepStrictEqual(marked, [m.calcBest], `標建議的按鈕不對：${why}`);
+  assert.ok(m.on[m.calcBest].badge, `看不到「建議」小牌：${why}`);
+  assert.ok(!m.off[m.calcBest].badge, `關掉提示後「建議」還在：${why}`);
   assert.strictEqual(m.seenCount, m.faceUp, `算勝率用的牌數不等於桌上翻開的牌數：${why}`);
   assert.strictEqual(m.faceUp, m.onTable - 1, `輪到你時桌上應該只有荷官底牌蓋著：${why}`);
   assert.ok(['hit', 'stand', 'double'].every(k => !m.off[k].shown), `關掉之後還看得到：${why}`);
@@ -194,6 +201,17 @@ test(`${first()}：輪到你時每個動作標出勝率，只用翻開的牌算�
   assert.deepStrictEqual(m.pref, { odds: false });
   assert.deepStrictEqual(after, { pressed: 'false', text: '勝率提示：關' });
   assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：按鈕沒標建議時，要抓到「標建議的按鈕不對」', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'hud.js'), "$(id).classList.toggle('best', !!(r && o.best === key));", '');
+  try {
+    const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(ODDS_TURN, 30000)));
+    const marked = ['hit', 'stand', 'double'].filter(k => r.value.on[k].best);
+    assert.notDeepStrictEqual(marked, [r.value.calcBest], JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('陽性對照：把荷官底牌也算進勝率，要抓到「用的牌比翻開的多」', async () => {
