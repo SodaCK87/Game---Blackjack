@@ -62,6 +62,14 @@
     el.hidden = true;
   }
 
+  // 疊在牌桌上的字（中心對齊）夾回畫布範圍內：直式手機的牌桌放大到桌緣超出畫面，邊上座位的名牌會跟著出去
+  function keepInView(el) {
+    const hw = el.offsetWidth / 2 + 4, hh = el.offsetHeight / 2 + 4;
+    const W = window.innerWidth, H = document.getElementById('table').clientHeight;
+    el.style.left = `${Math.min(Math.max(parseFloat(el.style.left), hw), W - hw)}px`;
+    el.style.top = `${Math.min(Math.max(parseFloat(el.style.top), hh), H - hh)}px`;
+  }
+
   // 座位旁冒出一句小對白，往上飄、淡出；不擋流程，回傳的 Promise 播完才 resolve
   async function pop(text, at, kind) {
     const el = document.createElement('div');
@@ -70,9 +78,10 @@
     el.style.left = `${at.x}px`;
     el.style.top = `${at.y}px`;
     document.getElementById('overlay').appendChild(el);
+    keepInView(el);
     await A.wait(1600);
     el.remove();
   }
 
-  V.fx = { arc, shake, coinRain, banner, pop };
+  V.fx = { arc, shake, coinRain, banner, pop, keepInView };
 })();

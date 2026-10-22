@@ -111,6 +111,7 @@
       const s = project(p);
       el.style.left = `${s.x}px`;
       el.style.top = `${s.y}px`;
+      FX.keepInView(el);
     }
     function visibleValue(list) {
       const up = list.filter(m => m.rotation.z === 0).map(m => m.userData);
@@ -148,8 +149,9 @@
     function popLine(id, key) {
       const line = LINES[meta[id].personality] && LINES[meta[id].personality][key];
       if (!line) return;
-      const at = project(railOf(id).setY(0));
-      FX.pop(line, { x: at.x, y: at.y - 34 }, key);
+      // 跟著名牌現在的位置（可能被夾回畫面內、被讓位往上移過），不重新投影
+      const tag = tags[id];
+      FX.pop(line, { x: parseFloat(tag.style.left), y: parseFloat(tag.style.top) - 34 }, key);
     }
 
     // ---- 事件 → 動畫 ----

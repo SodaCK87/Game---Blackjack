@@ -1,4 +1,5 @@
-// 守介面：輪到你時桌上的標籤互不重疊、操作列的按鈕都在列內不換行、籌碼重新整理後還在、籌碼輸光能一鍵重置。
+// 守介面：輪到你時桌上的標籤互不重疊也不跑出畫面、手機的牌桌夠大、操作列的按鈕都在列內不換行、
+// 籌碼重新整理後還在、籌碼輸光能一鍵重置。
 // 驗不到：真手機（這裡是 CDP 模擬的尺寸）、真人手指點不點得準。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -33,11 +34,16 @@ const MEASURE_TURN = `(async () => {
   return { reached, labels, buttons, hud: { ...rect(hud), scrollH: hud.scrollHeight, clientH: hud.clientHeight }, vw: innerWidth, vh: innerHeight };
 })()`;
 
+// seatSpan：最左與最右兩個下注圈的中心在畫面上相距幾成畫面寬，量牌桌放得多大
 const MEASURE_BET = `(async () => {
-  await BJK.view.stage.dealer.ready;
+  const s = BJK.view.stage;
+  await s.dealer.ready;
   const hud = document.getElementById('hud');
   const rect = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
-  return { mode: hud.dataset.mode, buttons: [...document.querySelectorAll('#betBar button')].map(el => ({ text: el.textContent, ...rect(el) })),
+  const x = seat => seat.circle.clone().project(s.camera).x;
+  const seats = s.table.seats;
+  return { mode: hud.dataset.mode, seatSpan: (x(seats[seats.length - 1]) - x(seats[0])) / 2,
+           buttons: [...document.querySelectorAll('#betBar button')].map(el => ({ text: el.textContent, ...rect(el) })),
            hud: { ...rect(hud), scrollH: hud.scrollHeight, clientH: hud.clientHeight }, vw: innerWidth, vh: innerHeight };
 })()`;
 
@@ -63,6 +69,14 @@ function assertButtonsFit(m, what) {
   assert.deepStrictEqual(pairsOverlapping(m.buttons), [], `${what} 的按鈕互相重疊`);
 }
 
+// 標籤有沒有整個落在畫布裡（畫布底＝操作列頂）
+function labelsOutOfView(m) {
+  return m.labels.filter(l => l.left < 0 || l.right > m.vw || l.top < 0 || l.bottom > m.hud.top).map(l => l.text);
+}
+
+// 2026-10-22 量到直式手機改框景前約 0.45、改後約 0.65（小手機 0.43 → 0.61），門檻取中間
+const PHONE_SEAT_SPAN = 0.55;
+
 function copyWith(file, from, to) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-app-'));
   fs.cpSync(APP, tmp, { recursive: true });
@@ -75,20 +89,23 @@ function copyWith(file, from, to) {
 
 for (const browser of availableBrowsers()) {
   for (const [name, vp] of [['桌機', DESKTOP], ['手機', PHONE], ['小手機', SMALL_PHONE]]) {
-    test(`${browser}：${name}輪到你時，桌上的標籤互不重疊、動作按鈕排成一列`, async () => {
+    test(`${browser}：${name}輪到你時，桌上的標籤互不重疊、都在畫面內，動作按鈕排成一列`, async () => {
       const r = await withPage(browser, vp, page => page.goto(url(APP)).then(() => page.evaluate(MEASURE_TURN, 30000)));
       const m = r.value;
       assert.ok(m.reached, '打了 6 局都沒輪到你');
       assert.ok(m.labels.length >= 6, `標籤太少，量不出東西：${JSON.stringify(m.labels)}`);
       assert.deepStrictEqual(pairsOverlapping(m.labels), [], `標籤重疊：${JSON.stringify(m.labels)}`);
+      assert.deepStrictEqual(labelsOutOfView(m), [], `標籤跑出畫面：${JSON.stringify(m.labels)}`);
       assertButtonsFit(m, '動作列');
       assert.deepStrictEqual(r.console, []);
     });
 
-    test(`${browser}：${name}下注列六顆按鈕排成一列、都在操作列內`, async () => {
+    test(`${browser}：${name}下注列六顆按鈕排成一列、都在操作列內${vp.mobile ? '，牌桌放大到最外兩個下注圈相距過半畫面' : ''}`, async t => {
       const r = await withPage(browser, vp, page => page.goto(url(APP)).then(() => page.evaluate(MEASURE_BET)));
       assert.strictEqual(r.value.mode, 'bet');
       assertButtonsFit(r.value, '下注列');
+      t.diagnostic(`最外兩個下注圈相距 ${(r.value.seatSpan * 100).toFixed(0)}% 畫面寬`);
+      if (vp.mobile) assert.ok(r.value.seatSpan >= PHONE_SEAT_SPAN, `牌桌太小：${r.value.seatSpan}`);
     });
   }
 
@@ -266,6 +283,26 @@ test('陽性對照：拿掉手機的按鈕縮窄，下注列要判成換行超�
   try {
     const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(MEASURE_BET)));
     assert.throws(() => assertButtonsFit(r.value, '下注列'), /換行|同一列|跑出/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：手機改回框整張桌子，牌桌要判成太小', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'main.js'), 'const pts = aspect < 1', 'const pts = false');
+  try {
+    const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(MEASURE_BET)));
+    assert.ok(r.value.seatSpan < PHONE_SEAT_SPAN, `破壞後最外兩個下注圈仍相距 ${r.value.seatSpan}，這條判準沒在分辨`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：拿掉名牌夾回畫面，手機上邊座位的名牌要判成跑出畫面', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), '      FX.keepInView(el);\n', '');
+  try {
+    const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(MEASURE_TURN, 30000)));
+    assert.ok(labelsOutOfView(r.value).length > 0, `破壞後標籤仍判成都在畫面內：${JSON.stringify(r.value.labels)}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -37,7 +37,7 @@ function assertHealthy(r, viewport) {
   assert.deepStrictEqual(r.bjk.scene.viewport, viewport.size, `頁面拿到的視窗尺寸不對\n${why}`);
   assert.strictEqual(r.bjk.scene.seats, 5, why);
   assert.ok(r.bjk.scene.chips > 0, `籌碼架上沒有籌碼\n${why}`);
-  assert.strictEqual(r.bjk.scene.fit, true, `牌桌與荷官沒有整個框進畫面\n${why}`);
+  assert.strictEqual(r.bjk.scene.fit, true, `牌桌（手機是玩牌的範圍）與荷官沒有整個框進畫面\n${why}`);
   assert.deepStrictEqual(r.bjk.dealer, { loaded: 5, mood: 'idle' }, `荷官五種表情沒有全部載入\n${why}`);
   assert.deepStrictEqual(r.console, [], '頁面不該有任何主控台訊息');
   assert.strictEqual(r.leftover, 0, '無頭瀏覽器的進程沒收乾淨');
@@ -63,7 +63,8 @@ for (const browser of browsers) {
     assertHealthy(await openApp(browser, APP, DESKTOP), DESKTOP);
   });
 
-  test(`${browser}：手機直式尺寸（390×844）也把整張牌桌框進畫面`, async () => {
+  // 手機直式只框玩牌用得到的範圍（桌子左右兩端刻意超出畫面），fit 量的是那個範圍
+  test(`${browser}：手機直式尺寸（390×844）也把玩牌的範圍與荷官框進畫面`, async () => {
     assertHealthy(await openApp(browser, APP, PHONE), PHONE);
   });
 
@@ -93,7 +94,7 @@ for (const browser of browsers) {
 
   // 陽性對照二：拿掉自動框景，手機尺寸下牌桌會被切掉，fit 要變 false
   test(`${browser}：陽性對照——拿掉自動框景時，手機尺寸要判成沒框進畫面`, async () => {
-    const tmp = brokenCopy(path.join('js', 'view', 'main.js'), 'fitCamera(camera, tableBox, target, dir);', '');
+    const tmp = brokenCopy(path.join('js', 'view', 'main.js'), 'fitCamera(camera, pts, target, dir);', '');
     try {
       const r = await openApp(browser, tmp, PHONE);
       assert.strictEqual(r.bjk && r.bjk.render, 'ok', `破壞後頁面應該照樣畫得出來：${JSON.stringify(r.bjk)}`);
