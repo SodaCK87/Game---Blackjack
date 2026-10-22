@@ -1,0 +1,11 @@
+# 行尾規則寫死在這裡，不依賴各台電腦的 core.autocrlf
+* text=auto eol=lf
+
+# 二進位：被當成文字做行尾轉換會壞檔
+*.png   binary
+*.jpg   binary
+*.webp  binary
+*.woff2 binary
+
+# 第三方函式庫：不看 diff、不算進 GitHub 的語言統計
+app/lib/** -diff linguist-vendored
