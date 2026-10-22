@@ -9,7 +9,8 @@ const MUTANTS = [
   ['荷官 16 點就停', 'app/js/core/game.js', 'hand.value(dealer.cards).total < 17', 'hand.value(dealer.cards).total < 16', 'tests/check_game.js'],
   ['荷官不偷看底牌', 'app/js/core/game.js', "(up.rank === 'A' || hand.isTen(up.rank)) && hand.value", 'false && hand.value', 'tests/check_game.js'],
   ['加倍沒扣籌碼', 'app/js/core/game.js', 's.bankroll -= s.bet;\n        s.bet *= 2;', 's.bet *= 2;', 'tests/check_simulation.js'],
-  ['軟 18 對 9 改成停', 'app/js/core/strategy.js', "return d <= 8 ? 'stand' : 'hit';", "return d <= 9 ? 'stand' : 'hit';", 'tests/check_strategy.js'],
+  ['A+A 對 6 退回要牌', 'app/js/core/strategy.js', "return d === 6 ? dbl('hit') : 'hit';", "return 'hit';", 'tests/check_odds.js'],
+  ['軟 18 對 9 改成停','app/js/core/strategy.js', "return d <= 8 ? 'stand' : 'hit';", "return d <= 9 ? 'stand' : 'hit';", 'tests/check_strategy.js'],
   ['A 算 11 的條件差一', 'app/js/core/hand.js', 'total + 10 <= 21', 'total + 10 < 21', 'tests/check_hand.js'],
   // 牌局裡（有 rng）走 HUMAN、照表（沒 rng）走 DECIDE，兩條路各破一次；只破 DECIDE 的話長跑模擬根本碰不到它
   ['穩健型照表改成永遠停牌', 'app/js/core/strategy.js', 'const DECIDE = { steady: basic,', "const DECIDE = { steady: () => 'stand',", 'tests/check_strategy.js'],

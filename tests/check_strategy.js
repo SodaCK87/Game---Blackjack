@@ -30,7 +30,8 @@ test('穩健：軟牌', () => {
     [h('A', '6'), '2', 'hit'], [h('A', '6'), '3', 'double'], [h('A', '6'), '7', 'hit'],
     [h('A', '5'), '3', 'hit'], [h('A', '5'), '4', 'double'], [h('A', '4'), '6', 'double'],
     [h('A', '3'), '4', 'hit'], [h('A', '3'), '5', 'double'], [h('A', '2'), '6', 'double'], [h('A', '2'), '7', 'hit'],
-    [h('A', 'A'), '6', 'hit'],
+    // A+A 公開的表是分牌；這裡不能分牌，答案來自逐張扣牌的精確計算（v0.7.2 版本紀錄）
+    [h('A', 'A'), '5', 'hit'], [h('A', 'A'), '6', 'double'], [h('A', 'A'), '7', 'hit'],
   ];
   for (const [cards, d, want] of cases) {
     assert.strictEqual(decide('steady', cards, up(d), true), want, `${cards.map(c => c.rank).join('+')} 對 ${d}`);
@@ -41,6 +42,7 @@ test('穩健：不能加倍時，「加倍或停」改停、「加倍或要」�
   assert.strictEqual(decide('steady', h('A', '7'), up('4'), false), 'stand');
   assert.strictEqual(decide('steady', h('6', '5'), up('6'), false), 'hit');
   assert.strictEqual(decide('steady', h('2', '3', '6'), up('6'), false), 'hit');
+  assert.strictEqual(decide('steady', h('A', 'A'), up('6'), false), 'hit');
 });
 
 test('莽撞：16 點以下都要牌、9–11 點一律加倍', () => {

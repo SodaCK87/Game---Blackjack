@@ -124,9 +124,9 @@ test('建議挑期望值最高的那個，加倍的期望值算兩倍', () => {
   for (const k of ['stand', 'hit', 'double']) assert.ok(o.ev[o.best] >= o.ev[k]);
 });
 
-// 2026-10-22 量到 540 格只有 1 格不一致（A+A 對 6：表要牌、算加倍——公開的表在這格是分牌，
-// 這個遊戲不能分牌，strategy.js 退回要牌；不能分牌時加倍確實比較好）。門檻定 99%：最多容 5 格
-test('建議與公開的基本策略表對照：兩張牌的每一種組合對每一種明牌，至少 99% 一致', t => {
+// v0.7.1 時 540 格只差 A+A 對 6 一格（表要牌、算加倍），v0.7.2 照精確計算把表改成加倍後全部一致。
+// 要求全對：以後哪一邊改了規則或近似法，翻牌的那格會被點名出來，再決定是表錯還是算錯
+test('建議與基本策略表對照：兩張牌的每一種組合對每一種明牌，540 格全部一致', t => {
   const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   let same = 0, total = 0;
   const diff = [];
@@ -144,5 +144,6 @@ test('建議與公開的基本策略表對照：兩張牌的每一種組合對�
     }
   }
   t.diagnostic(`${total} 格一致 ${same} 格（${(same / total * 100).toFixed(1)}%）；不一致：${diff.join('；') || '無'}`);
-  assert.ok(same / total >= 0.99, `一致率 ${(same / total * 100).toFixed(1)}%：${diff.slice(0, 10).join('；')}`);
+  assert.strictEqual(total, 540);
+  assert.deepStrictEqual(diff, []);
 });

@@ -31,7 +31,8 @@
       if (t === 17) return d >= 3 && d <= 6 ? dbl('hit') : 'hit';
       if (t >= 15) return d >= 4 && d <= 6 ? dbl('hit') : 'hit';
       if (t >= 13) return d >= 5 && d <= 6 ? dbl('hit') : 'hit';
-      return 'hit';
+      // 軟 12 只會是 A+A：公開的表是分牌，不能分牌時逐張扣牌精確算過，只有對 6 加倍贏要牌（0.1907 對 0.1880）
+      return d === 6 ? dbl('hit') : 'hit';
     }
     if (t >= 17) return 'stand';
     if (t >= 13) return d <= 6 ? 'stand' : 'hit';
