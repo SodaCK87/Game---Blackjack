@@ -15,3 +15,43 @@ html, body {
   width: 100vw;
   height: 100vh;
 }
+
+/* 荷官的對白泡泡：位置由 dealer.js 依荷官頭部的螢幕座標算 */
+.bubble {
+  position: fixed;
+  max-width: min(260px, 64vw);
+  padding: 10px 14px;
+  background: #f7f4ec;
+  color: var(--bg);
+  border: 2px solid var(--teal);
+  border-radius: 14px;
+  font: 16px/1.45 "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.bubble[hidden] {
+  display: none;
+}
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #f7f4ec;
+  border-left: 2px solid var(--teal);
+  border-bottom: 2px solid var(--teal);
+}
+
+.bubble[data-side="right"]::after {
+  left: -8px;
+  top: calc(50% - 7px);
+  transform: rotate(45deg);
+}
+
+.bubble[data-side="top"]::after {
+  bottom: -8px;
+  left: calc(50% - 7px);
+  transform: rotate(-45deg);
+}

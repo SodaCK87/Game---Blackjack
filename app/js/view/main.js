@@ -1,7 +1,9 @@
-// 組場景：牌桌、燈光、鏡頭，與階段 2 的展示牌局（階段 4 接上規則引擎後換成真的發牌）
+// 組場景：牌桌、荷官、燈光、鏡頭，與階段 2 的展示牌局（階段 4 接上規則引擎後換成真的發牌）
 (function () {
   const V = window.BJK && window.BJK.view;
-  const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null, core: 'not-run' };
+  const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null, core: 'not-run', dealer: null };
+  // 給 tests/check_file_protocol.js 讀的狀態，畫面上不顯示。荷官貼圖是非同步載入，載完會再寫一次
+  const publish = () => { document.body.dataset.bjk = JSON.stringify(status); };
   // 階段 4 接上畫面前，先在瀏覽器裡用 core 跑一局全 AI 牌局，確認四支 core 在 classic script 下載得起來、接得上
   try {
     const g = BJK.game.createGame({
@@ -52,9 +54,16 @@
 
     dealDemo(T);
 
-    // 鏡頭框景只框牌桌本身，地板不算
-    const tableBox = new THREE.Box3().setFromObject(T.group);
-    const target = new THREE.Vector3(0, 0, 2.3);
+    const render = () => renderer.render(scene, camera);
+    const project = p => {
+      const v = p.clone().project(camera);
+      return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight };
+    };
+    const dealer = V.dealer.create({ bubble: document.getElementById('bubble'), project, onChange: render });
+    // 站在直邊後面、腰部以下被桌子擋住；籌碼架在它前面
+    dealer.mesh.position.set(0, -0.6, -0.6);
+    scene.add(dealer.mesh);
+    V.stage = { dealer, render };
 
     function layout() {
       const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
@@ -65,12 +74,18 @@
       // 直式螢幕改成較俯視的角度，桌子才不會縮成一條
       const elev = (aspect < 1 ? 64 : 40) * Math.PI / 180;
       const dir = new THREE.Vector3(0, Math.sin(elev), Math.cos(elev));
+      V.dealer.face(dealer.mesh, elev);
+      scene.updateMatrixWorld();
+      // 框景框牌桌加荷官，地板不算
+      const tableBox = new THREE.Box3().setFromObject(T.group).union(new THREE.Box3().setFromObject(dealer.mesh));
+      const target = tableBox.getCenter(new THREE.Vector3());
       camera.position.copy(target).addScaledVector(dir, 12);
       camera.lookAt(target);
       fitCamera(camera, tableBox, target, dir);
       status.scene.fit = inView(camera, tableBox, 1);
       status.scene.viewport = [w, h];
-      renderer.render(scene, camera);
+      render();
+      dealer.placeBubble();
     }
 
     let cards = 0, chips = 0;
@@ -79,11 +94,18 @@
     window.addEventListener('resize', layout);
     layout();
     status.render = 'ok';
+    dealer.ready.then(() => {
+      status.dealer = { loaded: dealer.loaded, mood: dealer.mood };
+      dealer.say('歡迎光臨，請下注！');
+      publish();
+    }, e => {
+      status.dealer = { error: e.message };
+      publish();
+    });
   } catch (e) {
     status.render = 'fail: ' + e.message;
   }
-  // 給 tests/check_file_protocol.js 讀的狀態，畫面上不顯示
-  document.body.dataset.bjk = JSON.stringify(status);
+  publish();
 
   // 沿著視線方向前後移動鏡頭，找出牌桌八個角都還在畫面裡的最近距離
   function fitCamera(camera, box, target, dir) {

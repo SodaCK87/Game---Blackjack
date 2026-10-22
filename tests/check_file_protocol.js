@@ -19,7 +19,11 @@ const PHONE = { size: [390, 844], mobile: true };
 async function openApp(browser, appDir, viewport) {
   const r = await withPage(browser, viewport, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
-    const raw = await page.evaluate('document.body.dataset.bjk || null');
+    // 荷官貼圖非同步載入，等它載完（或載入失敗）再讀狀態；three 沒載入時 stage 不存在，直接讀
+    const raw = await page.evaluate(`(async () => {
+      try { await BJK.view.stage.dealer.ready; } catch (e) {}
+      return document.body.dataset.bjk || null;
+    })()`);
     return raw ? JSON.parse(raw) : null;
   });
   return { bjk: r.value, console: r.console, leftover: r.leftover };
@@ -33,7 +37,8 @@ function assertHealthy(r, viewport) {
   assert.deepStrictEqual(r.bjk.scene.viewport, viewport.size, `頁面拿到的視窗尺寸不對\n${why}`);
   assert.strictEqual(r.bjk.scene.seats, 5, why);
   assert.ok(r.bjk.scene.cards > 0 && r.bjk.scene.chips > 0, why);
-  assert.strictEqual(r.bjk.scene.fit, true, `牌桌沒有整張框進畫面\n${why}`);
+  assert.strictEqual(r.bjk.scene.fit, true, `牌桌與荷官沒有整個框進畫面\n${why}`);
+  assert.deepStrictEqual(r.bjk.dealer, { loaded: 5, mood: 'idle' }, `荷官五種表情沒有全部載入\n${why}`);
   assert.deepStrictEqual(r.console, [], '頁面不該有任何主控台訊息');
   assert.strictEqual(r.leftover, 0, '無頭瀏覽器的進程沒收乾淨');
 }
