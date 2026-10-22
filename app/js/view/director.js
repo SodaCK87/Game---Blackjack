@@ -19,12 +19,32 @@
     timid: { win: '贏、贏了？', lose: '唉…', bust: '嗚，爆了…', blackjack: '真的假的！', push: '還好還好。', double: '加、加倍…', stand: '我、我停。', rebuy: '只好再買一點…' },
   };
 
+  // 籌碼存在這台電腦的瀏覽器裡（localStorage）。讀不到、格式不對就當新玩家，不擲錯
+  const SAVE_KEY = 'bjk.save.v1';
+  function loadSave() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+      if (!s || s.v !== 1 || typeof s.bankrolls !== 'object') return {};
+      const ok = n => Number.isFinite(n) && n >= 0 && n % 5 === 0;
+      return Object.fromEntries(Object.entries(s.bankrolls).filter(([, n]) => ok(n)));
+    } catch (e) {
+      return {};
+    }
+  }
+
   function create({ scene, table: T, dealer, project, render, hud }) {
     const rng = V.rng(Date.now() & 0x7fffffff);
+    const saved = loadSave();
     const game = BJK.game.createGame({
       rng,
-      seats: SEATS.map(s => ({ id: s.id, name: s.name, personality: s.personality, bankroll: START })),
+      seats: SEATS.map(s => ({ id: s.id, name: s.name, personality: s.personality, bankroll: s.id in saved ? saved[s.id] : START })),
     });
+    function save() {
+      try {
+        const bankrolls = Object.fromEntries(game.state().seats.map(s => [s.id, s.bankroll]));
+        localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, bankrolls }));
+      } catch (e) { /* 無痕視窗或關掉網站資料時寫不進去：這一場照玩，只是不記 */ }
+    }
     const rules = game.rules;
     const meta = Object.fromEntries(SEATS.map(s => [s.id, s]));
     const cards = new Map(SEATS.map(s => [s.id, []]));
@@ -98,6 +118,24 @@
         el.classList.toggle('bust', v.bust);
         place(el, slot(id, Math.max(0, list.length - 1)).add(new THREE.Vector3(0, 0.45, 0)));
       }
+      declutter([...Object.values(totals), ...Object.values(tags)]);
+    }
+
+    // 標籤互相壓到時，由下往上排：上面那個往上讓到不重疊為止（點數標籤本來就在牌的上方，往上讓不會蓋到自己的牌）
+    function declutter(els) {
+      const items = els.filter(el => !el.hidden).map(el => ({ el, r: el.getBoundingClientRect(), dy: 0 }));
+      items.sort((a, b) => b.r.top - a.r.top);
+      const box = it => ({ left: it.r.left, right: it.r.right, top: it.r.top + it.dy, bottom: it.r.bottom + it.dy });
+      const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      for (let i = 1; i < items.length; i++) {
+        for (let guard = 0; guard < items.length; guard++) {
+          const me = box(items[i]);
+          const below = items.slice(0, i).map(box).find(b => hit(me, b));
+          if (!below) break;
+          items[i].dy -= me.bottom - below.top + 2;
+        }
+      }
+      for (const it of items) if (it.dy) it.el.style.top = `${parseFloat(it.el.style.top) + it.dy}px`;
     }
 
     function say(mood, text) {
@@ -322,13 +360,24 @@
     }
 
     function enterBetting() {
+      save();
+      updateLabels();
       const me = game.state().seats.find(s => s.id === 'me');
       if (me.bankroll < rules.minBet) {
-        game.topUp('me', START);
-        say('idle', `籌碼用完了，再送你 ${START}。`);
+        hud.mode('broke');
+        say('sorry', '籌碼輸光了。按「重新開始」補回 1,000 再來一次。');
+      } else {
+        hud.mode('bet');
       }
-      updateLabels();
-      hud.mode('bet');
+    }
+
+    // 破產一鍵重置：只補玩家，補到剛好 START
+    function resetBankroll() {
+      const me = game.state().seats.find(s => s.id === 'me');
+      if (me.bankroll >= rules.minBet) return;
+      game.topUp('me', START - me.bankroll);
+      say('smile', '籌碼補好了，祝你好運！');
+      enterBetting();
     }
 
     // 探針用：玩家也交給穩健策略，連打 n 局，回傳每局花多久與畫面引擎的不一致清單
@@ -338,6 +387,7 @@
       try {
         for (let i = 0; i < n; i++) {
           const t0 = performance.now();
+          resetBankroll();
           const me = game.state().seats.find(s => s.id === 'me');
           await runRound(Math.min(bet || 50, me.bankroll - (me.bankroll % rules.step)));
           times.push(Math.round(performance.now() - t0));
@@ -351,10 +401,10 @@
     function layout() { updateLabels(); }
 
     enterBetting();
-    say('idle', '歡迎光臨，請下注！');
+    if (hud.currentMode !== 'broke') say('idle', saved.me !== undefined ? '歡迎回來，籌碼幫你留著了。請下注！' : '歡迎光臨，請下注！');
 
     return {
-      game, layout, autoplay, runRound,
+      game, layout, autoplay, runRound, resetBankroll,
       get mismatches() { return mismatches.slice(); },
       get rounds() { return roundsPlayed; },
     };

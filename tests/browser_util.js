@@ -123,10 +123,14 @@ async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn
       try { await client.send('Browser.close'); } catch { /* 已經關了 */ }
       client.close();
     }
-    for (let i = 0; i < 50 && proc.exitCode === null; i++) await sleep(100);
+    for (let i = 0; i < 100 && proc.exitCode === null; i++) await sleep(100);
     let left = markedPids(marker);
     if (left.length) {
-      execFileSync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${left.join(',')} -Force -ErrorAction SilentlyContinue`]);
+      // 列出來到砍下去之間，有些進程已經自己結束了：Stop-Process 找不到 pid 會讓 powershell 回非零（
+      // -ErrorAction SilentlyContinue 只擋訊息、不擋退出碼），探針就被自己的收尾弄紅。所以逐一砍、最後明講 exit 0，
+      // 收得乾不乾淨以下一行重數為準
+      const kill = left.map(pid => `try { Stop-Process -Id ${pid} -Force -ErrorAction Stop } catch {}`).join('; ');
+      execFileSync('powershell', ['-NoProfile', '-Command', `${kill}; exit 0`]);
       left = markedPids(marker);
     }
     result.leftover = left.length;

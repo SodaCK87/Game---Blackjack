@@ -2,9 +2,10 @@
 (function () {
   const V = window.BJK.view;
 
-  function create({ minBet, maxBet, onDeal }) {
+  function create({ minBet, maxBet, onDeal, onReset }) {
     const $ = id => document.getElementById(id);
-    const betBar = $('betBar'), actBar = $('actBar');
+    const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
+    $('resetBtn').addEventListener('click', () => onReset());
     let bankroll = 0, bet = 0, inPlay = 0, mode = 'bet', lastBet = minBet, pendingAction = null;
 
     // 下注階段顯示正在疊的籌碼，牌局中顯示這一局實際押在桌上的（加倍後會變兩倍）
@@ -40,11 +41,12 @@
 
     return {
       setBank(n, onTable) { bankroll = n; inPlay = onTable || 0; refresh(); },
-      // mode：'bet' 下注、'act' 輪到你（legal 是可以按的動作）、'busy' 動畫中全部鎖住
+      // mode：'bet' 下注、'act' 輪到你（legal 是可以按的動作）、'busy' 動畫中全部鎖住、'broke' 籌碼輸光只剩重新開始
       mode(m, legal) {
         mode = m;
         betBar.hidden = m !== 'bet';
         actBar.hidden = m !== 'act';
+        brokeBar.hidden = m !== 'broke';
         if (m === 'bet') bet = Math.min(lastBet, bankroll, maxBet) >= minBet ? Math.min(lastBet, bankroll, maxBet) : 0;
         if (m === 'act') {
           $('hitBtn').disabled = !legal.includes('hit');
@@ -55,6 +57,7 @@
         refresh();
       },
       nextAction() { return new Promise(resolve => { pendingAction = resolve; }); },
+      get currentMode() { return mode; },
     };
   }
 

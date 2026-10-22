@@ -188,6 +188,29 @@ html, body {
   visibility: hidden;
 }
 
+/* 手機：下注列六顆按鈕要擠在一排，否則換行後會超出固定高度的操作列 */
+@media (max-width: 480px) {
+  .hud-bar {
+    gap: 4px;
+  }
+
+  #hud button {
+    min-width: 44px;
+    padding: 9px 8px;
+    font-size: 14px;
+  }
+
+  .seat-tag {
+    font-size: 11px;
+    padding: 2px 7px;
+  }
+
+  .total {
+    font-size: 12px;
+    padding: 1px 6px;
+  }
+}
+
 /* 荷官的對白泡泡：位置由 dealer.js 依荷官頭部的螢幕座標算 */
 .bubble {
   position: fixed;

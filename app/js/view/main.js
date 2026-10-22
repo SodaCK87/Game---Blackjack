@@ -35,7 +35,8 @@
     const T = V.table.build();
     scene.add(T.group);
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x1a2327, roughness: 1 }));
+    // 地板要夠大：直式螢幕鏡頭往上平移後，60×60 的遠端邊緣會在畫面頂端露出一條背景色
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x1a2327, roughness: 1 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.82;
     floor.receiveShadow = true;
@@ -70,6 +71,7 @@
       minBet: BJK.game.DEFAULTS.minBet,
       maxBet: BJK.game.DEFAULTS.maxBet,
       onDeal: bet => director.runRound(bet),
+      onReset: () => director.resetBankroll(),
     });
 
     function layout() {
@@ -84,6 +86,8 @@
       const elev = (aspect < 1 ? 64 : 40) * Math.PI / 180;
       const dir = new THREE.Vector3(0, Math.sin(elev), Math.cos(elev));
       V.dealer.face(dealer.mesh, elev);
+      // 直式螢幕是寬度先頂到：牌桌大小已經定了，上方多出來的高度讓荷官放大來撐
+      dealer.mesh.scale.setScalar(aspect < 1 ? 2.2 : 1);
       scene.updateMatrixWorld();
       // 框景框牌桌加荷官，地板不算
       const tableBox = new THREE.Box3().setFromObject(T.group).union(new THREE.Box3().setFromObject(dealer.mesh));
@@ -91,6 +95,7 @@
       camera.position.copy(target).addScaledVector(dir, 12);
       camera.lookAt(target);
       fitCamera(camera, tableBox, target, dir);
+      alignBottom(camera, tableBox, target);
       status.scene.fit = inView(camera, tableBox, 1);
       status.scene.viewport = [window.innerWidth, window.innerHeight];
       render();
@@ -132,6 +137,28 @@
     camera.position.copy(target).addScaledVector(dir, hi);
     camera.lookAt(target);
     camera.updateMatrixWorld();
+  }
+
+  // 框住之後若上下還有空（直式螢幕寬度先頂到），把整組往下貼齊畫布底，空間留在上方給對白泡泡。
+  // 鏡頭沿自己的上方向平移；透視會讓一次平移不準，所以多修兩輪
+  function alignBottom(camera, box, target) {
+    const up = new THREE.Vector3();
+    for (let k = 0; k < 3; k++) {
+      const ys = corners(box).map(p => p.project(camera).y);
+      const slack = Math.min(...ys) + 0.94;
+      if (slack <= 0.001) return;
+      const worldH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.distanceTo(target);
+      up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      camera.position.addScaledVector(up, slack / 2 * worldH);
+      target.addScaledVector(up, slack / 2 * worldH);
+      camera.updateMatrixWorld();
+    }
+  }
+
+  function corners(box) {
+    const { min, max } = box, out = [];
+    for (const x of [min.x, max.x]) for (const y of [min.y, max.y]) for (const z of [min.z, max.z]) out.push(new THREE.Vector3(x, y, z));
+    return out;
   }
 
   function inView(camera, box, margin) {
