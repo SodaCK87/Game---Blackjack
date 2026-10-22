@@ -3,5 +3,5 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else (root.BJK = root.BJK || {}).version = factory();
 })(globalThis, function () {
-  return { BJK_VER: '0.4.0' };
+  return { BJK_VER: '0.4.1' };
 });

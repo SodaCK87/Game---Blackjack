@@ -5,55 +5,108 @@
   const MOODS = { idle: '待機', deal: '發牌', surprised: '驚訝', smile: '微笑', sorry: '遺憾' };
   const VB_W = 400, VB_H = 520;          // SVG 座標
   const H = 3.4, W = H * VB_W / VB_H;    // 立牌在場景裡的大小
-  const HEAD = { cx: 200, cy: 190, rx: 92, ry: 104 };
+  // 臉部外框（含頭髮），給對白泡泡避開用
+  const HEAD = { cx: 200, cy: 190, rx: 84, ry: 114 };
 
+  // 美式硬派：粗黑描邊、單一硬陰影（光從左上來，陰影落在右側）、方下巴、鬍渣、油頭、眉上一道疤
   const C = {
-    skin: '#f2c9a5', hair: '#3b2a20', ink: '#212c31', lip: '#8a3b2e', shirt: '#f7f4ec',
-    vest: '#212c31', teal: '#008080', red: '#b3261e', blush: '#f08a7a', sweat: '#9fd3e0',
+    ink: '#161c1f', skin: '#e2ad86', shade: '#b9835f', scar: '#f2c9a8', stubble: '#2b2723',
+    hair: '#1f1a17', hairHi: '#6b625c', shirt: '#f4efe6', shirtShade: '#cfc7b8',
+    vest: '#232b30', vestHi: '#3a464d', garter: '#9b1c14', brass: '#c9a227', teal: '#008080',
+    mouth: '#3a1f1a', sweat: '#cfe9ef',
   };
+  const line = (d, color, width, extra) =>
+    `<path d="${d}" stroke="${color}" stroke-width="${width}" fill="none" stroke-linecap="round" stroke-linejoin="round"${extra || ''}/>`;
+  const shape = (d, fill, strokeWidth) =>
+    `<path d="${d}" fill="${fill}"${strokeWidth ? ` stroke="${C.ink}" stroke-width="${strokeWidth}" stroke-linejoin="round"` : ''}/>`;
 
-  const BROWS_SOFT = `<path d="M150 170 Q165 161 181 168 M219 168 Q235 161 250 170" stroke="${C.hair}" stroke-width="5" fill="none" stroke-linecap="round"/>`;
-  const EYES_OPEN = `<ellipse cx="165" cy="198" rx="7" ry="9" fill="${C.ink}"/><ellipse cx="235" cy="198" rx="7" ry="9" fill="${C.ink}"/>
-    <circle cx="167" cy="195" r="2.5" fill="#fff"/><circle cx="237" cy="195" r="2.5" fill="#fff"/>`;
+  const BROWS = {
+    flat: shape('M146 170 L188 163 L189 173 L149 179 Z M212 163 L254 170 L251 179 L211 173 Z', C.hair),
+    low: shape('M146 175 L188 170 L188 179 L148 184 Z M212 170 L254 175 L252 184 L212 179 Z', C.hair),
+    cocked: shape('M146 158 Q166 140 189 152 L188 162 Q166 152 148 168 Z M212 163 L254 170 L251 179 L211 173 Z', C.hair),
+    knit: shape('M146 177 L186 163 L188 172 L150 185 Z M212 163 L254 177 L250 185 L212 172 Z', C.hair),
+  };
+  // 疤畫在眉毛之後，把左眉切出一道缺口
+  const SCAR = line('M162 154 L171 186', C.scar, 3.5);
+  const EYES = {
+    hard: line('M154 190 Q170 182 186 188 M214 188 Q230 182 246 190', C.ink, 5) +
+      `<circle cx="172" cy="192" r="4.5" fill="${C.ink}"/><circle cx="230" cy="192" r="4.5" fill="${C.ink}"/>` +
+      line('M160 198 L182 197 M218 197 L240 198 M150 201 L144 204 M250 201 L256 204', C.shade, 2),
+    down: line('M154 192 Q170 188 186 192 M214 192 Q230 188 246 192', C.ink, 5) +
+      `<circle cx="174" cy="197" r="4" fill="${C.ink}"/><circle cx="232" cy="197" r="4" fill="${C.ink}"/>`,
+    wide: `<ellipse cx="171" cy="190" rx="13" ry="9" fill="${C.shirt}" stroke="${C.ink}" stroke-width="3"/>
+      <ellipse cx="229" cy="190" rx="13" ry="9" fill="${C.shirt}" stroke="${C.ink}" stroke-width="3"/>
+      <circle cx="171" cy="190" r="5" fill="${C.ink}"/><circle cx="229" cy="190" r="5" fill="${C.ink}"/>`,
+    squint: line('M154 190 Q170 184 186 190 M214 190 Q230 184 246 190', C.ink, 5) +
+      line('M158 196 Q170 200 182 196 M218 196 Q230 200 242 196', C.ink, 3) +
+      `<circle cx="172" cy="193" r="3.5" fill="${C.ink}"/><circle cx="230" cy="193" r="3.5" fill="${C.ink}"/>` +
+      line('M150 186 L143 181 M150 193 L142 193 M250 186 L257 181 M250 193 L258 193', C.shade, 2),
+    aside: line('M154 192 Q170 186 186 191 M214 191 Q230 186 246 192', C.ink, 5) +
+      `<circle cx="164" cy="195" r="4" fill="${C.ink}"/><circle cx="222" cy="195" r="4" fill="${C.ink}"/>`,
+  };
 
   const FACES = {
-    idle: `${BROWS_SOFT}${EYES_OPEN}
-      <path d="M180 242 Q200 254 220 242" stroke="${C.lip}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
-    deal: `<path d="M150 168 L181 168 M219 168 L250 168" stroke="${C.hair}" stroke-width="5" stroke-linecap="round"/>
-      <ellipse cx="169" cy="203" rx="7" ry="7" fill="${C.ink}"/><ellipse cx="239" cy="203" rx="7" ry="7" fill="${C.ink}"/>
-      <path d="M155 195 L179 197 M223 197 L247 195" stroke="${C.ink}" stroke-width="3" stroke-linecap="round"/>
-      <path d="M188 244 Q200 248 212 244" stroke="${C.lip}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
-    surprised: `<path d="M148 160 Q165 145 182 157 M218 157 Q235 145 252 160" stroke="${C.hair}" stroke-width="5" fill="none" stroke-linecap="round"/>
-      <circle cx="165" cy="198" r="11" fill="${C.ink}"/><circle cx="235" cy="198" r="11" fill="${C.ink}"/>
-      <circle cx="168" cy="194" r="3.5" fill="#fff"/><circle cx="238" cy="194" r="3.5" fill="#fff"/>
-      <ellipse cx="200" cy="248" rx="10" ry="14" fill="${C.lip}"/>`,
-    smile: `${BROWS_SOFT}
-      <path d="M154 202 Q165 188 176 202 M224 202 Q235 188 246 202" stroke="${C.ink}" stroke-width="5" fill="none" stroke-linecap="round"/>
-      <ellipse cx="146" cy="226" rx="16" ry="9" fill="${C.blush}" opacity="0.55"/><ellipse cx="254" cy="226" rx="16" ry="9" fill="${C.blush}" opacity="0.55"/>
-      <path d="M176 234 Q200 272 224 234 Z" fill="${C.lip}"/><path d="M182 237 Q200 243 218 237" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>`,
-    sorry: `<path d="M150 173 L181 162 M219 162 L250 173" stroke="${C.hair}" stroke-width="5" stroke-linecap="round"/>
-      <ellipse cx="165" cy="201" rx="7" ry="6" fill="${C.ink}"/><ellipse cx="235" cy="201" rx="7" ry="6" fill="${C.ink}"/>
-      <path d="M182 251 Q200 238 218 251" stroke="${C.lip}" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M284 140 Q297 162 284 173 Q271 162 284 140 Z" fill="${C.sweat}" stroke="#6fb3c4" stroke-width="1.5"/>`,
+    // 待機：面無表情、嘴角一邊微微上勾
+    idle: BROWS.flat + SCAR + EYES.hard +
+      line('M178 258 L212 257 Q222 255 228 248', C.ink, 4.5) + line('M188 267 L214 267', C.shade, 3),
+    // 發牌：眼睛往下盯著牌，嘴抿成一直線
+    deal: BROWS.low + SCAR + EYES.down + line('M182 259 L220 259', C.ink, 4.5),
+    // 驚訝：單邊挑眉、眼睛睜大、嘴微張，額頭擠出兩條紋
+    surprised: BROWS.cocked + SCAR + EYES.wide +
+      line('M168 136 Q190 130 212 136 M172 146 Q190 141 208 146', C.shade, 2.5) +
+      `<ellipse cx="203" cy="261" rx="9" ry="7" fill="${C.mouth}" stroke="${C.ink}" stroke-width="3"/>`,
+    // 微笑：露齒的自信咧嘴笑，眼角擠出魚尾紋
+    smile: BROWS.flat + SCAR + EYES.squint +
+      shape('M174 250 Q200 264 230 246 Q226 270 202 273 Q182 271 174 250 Z', C.shirt, 4) +
+      line('M180 257 Q202 265 226 253', C.shirtShade, 2) +
+      line('M166 244 Q162 256 168 268 M238 240 Q244 254 238 266', C.shade, 3),
+    // 遺憾：眉頭揪緊、眼神別開、嘴角一邊往下撇，額角一滴汗
+    sorry: BROWS.knit + SCAR + EYES.aside +
+      line('M196 160 L198 175 M204 160 L202 175', C.shade, 2) +
+      line('M178 262 Q192 254 206 260 Q216 265 226 259', C.ink, 4.5) +
+      shape('M262 128 Q271 143 262 150 Q253 143 262 128 Z', C.sweat, 2),
   };
 
-  // 發牌時右手（畫面右側）伸出來捏著一張牌
-  const DEAL_ARM = `<path d="M262 352 Q322 360 352 404" stroke="${C.shirt}" stroke-width="34" fill="none" stroke-linecap="round"/>
-    <g transform="rotate(18 366 392)"><rect x="342" y="358" width="48" height="66" rx="6" fill="${C.teal}" stroke="${C.shirt}" stroke-width="3"/></g>
-    <circle cx="354" cy="408" r="17" fill="${C.skin}"/>`;
+  // 發牌時右手（畫面右側）伸出來捏著一張牌；袖子先畫一道粗黑再疊白，就是描邊
+  const ARM = 'M282 362 Q312 372 330 398';
+  const FOREARM = 'M330 398 L344 414';
+  const DEAL_ARM = line(ARM, C.ink, 44) + line(ARM, C.shirt, 36) + line('M304 372 L318 392', C.garter, 9) +
+    line(FOREARM, C.ink, 30) + line(FOREARM, C.skin, 23) +
+    `<g transform="rotate(14 358 383)"><rect x="336" y="352" width="44" height="62" rx="5" fill="${C.teal}" stroke="${C.ink}" stroke-width="3"/>
+      <rect x="341" y="357" width="34" height="52" rx="3" fill="none" stroke="${C.shirt}" stroke-width="2"/></g>
+    <circle cx="346" cy="414" r="11" fill="${C.skin}" stroke="${C.ink}" stroke-width="3"/>`;
+
+  const HEAD_PATH = 'M130 118 Q200 66 270 118 L280 196 L272 252 Q258 290 228 304 L172 304 Q142 290 128 252 L120 196 Z';
 
   function svg(mood) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${VB_W * 2}" height="${VB_H * 2}" viewBox="0 0 ${VB_W} ${VB_H}">
-      <rect x="181" y="262" width="38" height="70" fill="${C.skin}"/>
-      <path d="M90 520 L95 385 Q100 345 135 335 L178 322 L222 322 L265 335 Q300 345 305 385 L310 520 Z" fill="${C.shirt}"/>
-      <path d="M118 362 Q122 342 150 337 L200 432 L250 337 Q278 342 282 362 L292 520 L108 520 Z" fill="${C.vest}"/>
-      <path d="M150 337 L200 432 L250 337" fill="none" stroke="${C.teal}" stroke-width="6" stroke-linejoin="round"/>
-      <path d="M126 372 Q114 440 118 520 M274 372 Q286 440 282 520" fill="none" stroke="#3a4a52" stroke-width="3"/>
-      <rect x="236" y="400" width="44" height="20" rx="3" fill="${C.shirt}"/><rect x="242" y="408" width="32" height="4" rx="2" fill="${C.teal}"/>
-      <path d="M200 336 L175 323 L175 350 Z M200 336 L225 323 L225 350 Z" fill="${C.red}"/><circle cx="200" cy="336" r="6" fill="#8e1d16"/>
-      <ellipse cx="110" cy="202" rx="14" ry="20" fill="${C.skin}"/><ellipse cx="290" cy="202" rx="14" ry="20" fill="${C.skin}"/>
-      <ellipse cx="${HEAD.cx}" cy="${HEAD.cy}" rx="${HEAD.rx}" ry="${HEAD.ry}" fill="${C.skin}"/>
-      <path d="M106 196 Q98 92 200 84 Q302 92 294 196 Q286 140 252 126 Q206 150 160 118 Q116 136 106 196 Z" fill="${C.hair}"/>
+      ${shape('M164 296 L236 296 L242 350 L158 350 Z', C.skin, 5)}
+      ${shape('M200 300 L236 300 L240 346 L210 346 Z', C.shade)}
+      ${shape('M70 520 L76 404 Q82 356 132 342 L172 332 L228 332 L268 342 Q318 356 324 404 L330 520 Z', C.shirt, 5)}
+      ${shape('M268 342 Q318 356 324 404 L330 520 L292 520 L288 400 Q284 370 262 350 Z', C.shirtShade)}
+      ${shape('M76 430 L112 436 L110 452 L75 446 Z M324 430 L288 436 L290 452 L325 446 Z', C.garter, 3)}
+      ${line('M112 380 Q104 450 108 520 M288 380 Q296 450 292 520', C.ink, 4)}
+      ${shape('M112 372 Q118 348 150 342 L200 452 L250 342 Q282 348 288 372 L296 520 L104 520 Z', C.vest, 5)}
+      ${line('M122 382 L150 354 L195 446', C.vestHi, 3)}
+      <circle cx="200" cy="472" r="4" fill="${C.brass}" stroke="${C.ink}" stroke-width="2"/>
+      <circle cx="200" cy="500" r="4" fill="${C.brass}" stroke="${C.ink}" stroke-width="2"/>
+      <rect x="236" y="404" width="40" height="14" rx="2" fill="${C.brass}" stroke="${C.ink}" stroke-width="2"/>
+      ${shape('M170 332 L186 356 L200 340 L214 356 L230 332 L214 338 L200 336 L186 338 Z', C.shirt, 3)}
+      ${shape('M200 344 L176 332 L178 358 Z M200 344 L224 332 L222 358 Z', C.ink)}
+      <rect x="194" y="338" width="12" height="12" rx="2" fill="${C.ink}" stroke="${C.vestHi}" stroke-width="1.5"/>
+      ${shape('M124 172 Q100 168 102 200 Q104 232 126 234 Z', C.skin, 4)}
+      ${shape('M276 172 Q300 168 298 200 Q296 232 274 234 Z', C.shade, 4)}
+      ${shape(HEAD_PATH, C.skin)}
+      ${shape('M232 108 Q258 112 270 120 L280 196 L272 252 Q258 290 228 304 L218 304 Q248 268 250 204 Q250 150 232 108 Z', C.shade)}
+      <path d="M126 236 Q138 288 172 304 L228 304 Q262 288 274 236 Q256 262 230 266 Q214 272 200 272 Q186 272 170 266 Q144 262 126 236 Z" fill="${C.stubble}" opacity="0.22"/>
+      ${shape('M201 180 L214 226 L206 230 Z', C.shade)}
+      ${line('M198 176 L188 228 Q198 234 210 229', C.ink, 3.5)}
+      ${line('M140 222 Q150 238 160 240', C.shade, 3)}
+      ${line('M200 286 L200 298', C.shade, 3)}
+      <path d="${HEAD_PATH}" fill="none" stroke="${C.ink}" stroke-width="5" stroke-linejoin="round"/>
+      ${shape('M120 170 Q108 66 200 54 Q296 62 282 170 Q276 122 254 110 Q230 100 212 116 L200 132 L188 116 Q168 100 146 110 Q124 122 120 170 Z', C.hair, 4)}
+      ${line('M150 110 Q166 78 210 64 M178 112 Q198 80 244 70 M226 108 Q246 84 270 94 M134 136 Q140 104 166 86', C.hairHi, 3, ' opacity="0.85"')}
+      ${shape('M120 168 L124 212 L132 212 L130 168 Z M282 168 L278 212 L270 212 L272 168 Z', C.hair)}
       ${FACES[mood]}
       ${mood === 'deal' ? DEAL_ARM : ''}
     </svg>`;
