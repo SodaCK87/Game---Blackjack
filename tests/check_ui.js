@@ -154,17 +154,37 @@ for (const browser of availableBrowsers()) {
 
 const first = () => availableBrowsers()[0];
 
-test('陽性對照：拿掉標籤讓位，手機輪到你時要抓到標籤重疊', async () => {
-  const tmp = copyWith(path.join('js', 'view', 'director.js'),
-    'declutter([...Object.values(totals), ...Object.values(tags)]);', '');
+// 牌局撞不撞出重疊要看運氣（AI 加了隨機之後，原本「打 4 次總會撞到一次」的對照就失手過），
+// 所以讓位本身另外用一組故意疊在同一點的標籤直接驗，對照也做在這上面
+const STACKED_LABELS = `(async () => {
+  await BJK.view.stage.dealer.ready;
+  const overlay = document.getElementById('overlay');
+  const els = ['21', '18', '11／21', '小虎 1,000'].map((t, i) => {
+    const el = document.createElement('div');
+    el.className = i === 3 ? 'seat-tag' : 'total';
+    el.textContent = t;
+    el.style.left = (200 + i * 6) + 'px';
+    el.style.top = '400px';
+    overlay.appendChild(el);
+    return el;
+  });
+  BJK.view.declutter(els);
+  const out = els.map(el => { const r = el.getBoundingClientRect(); return { text: el.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
+  els.forEach(el => el.remove());
+  return out;
+})()`;
+
+test(`${availableBrowsers()[0]}：四個疊在同一點的標籤，讓位之後互不重疊、全部只往上移`, async () => {
+  const r = await withPage(first(), SMALL_PHONE, page => page.goto(url(APP)).then(() => page.evaluate(STACKED_LABELS)));
+  assert.deepStrictEqual(pairsOverlapping(r.value), [], JSON.stringify(r.value));
+  assert.ok(r.value.every(l => l.bottom <= 400 + 30), `有標籤被往下推：${JSON.stringify(r.value)}`);
+});
+
+test('陽性對照：讓位只算不移，疊在同一點的標籤要判成重疊', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'items[i].dy -= me.bottom - below.top + 2;', 'break;');
   try {
-    // 重疊要看牌局，單一局不一定撞到；最多打 4 個輪到你的時刻，有一次重疊就算抓到
-    let found = [];
-    for (let i = 0; i < 4 && !found.length; i++) {
-      const r = await withPage(first(), SMALL_PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(MEASURE_TURN, 30000)));
-      found = pairsOverlapping(r.value.labels);
-    }
-    assert.ok(found.length > 0, '拿掉讓位之後 4 次都沒有重疊，這條判準在小手機上分辨不出來');
+    const r = await withPage(first(), SMALL_PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(STACKED_LABELS)));
+    assert.ok(pairsOverlapping(r.value).length > 0, '破壞後仍判成不重疊，這條判準沒在分辨');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

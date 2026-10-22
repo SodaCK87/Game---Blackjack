@@ -11,7 +11,11 @@ const MUTANTS = [
   ['加倍沒扣籌碼', 'app/js/core/game.js', 's.bankroll -= s.bet;\n        s.bet *= 2;', 's.bet *= 2;', 'tests/check_simulation.js'],
   ['軟 18 對 9 改成停', 'app/js/core/strategy.js', "return d <= 8 ? 'stand' : 'hit';", "return d <= 9 ? 'stand' : 'hit';", 'tests/check_strategy.js'],
   ['A 算 11 的條件差一', 'app/js/core/hand.js', 'total + 10 <= 21', 'total + 10 < 21', 'tests/check_hand.js'],
-  ['穩健型改成永遠停牌', 'app/js/core/strategy.js', 'const DECIDE = { steady: basic,', "const DECIDE = { steady: () => 'stand',", 'tests/check_simulation.js'],
+  // 牌局裡（有 rng）走 HUMAN、照表（沒 rng）走 DECIDE，兩條路各破一次；只破 DECIDE 的話長跑模擬根本碰不到它
+  ['穩健型照表改成永遠停牌', 'app/js/core/strategy.js', 'const DECIDE = { steady: basic,', "const DECIDE = { steady: () => 'stand',", 'tests/check_strategy.js'],
+  ['穩健型牌局裡改成永遠停牌', 'app/js/core/strategy.js', 'const base = basic(cards, up, canDouble);', "const base = 'stand';", 'tests/check_simulation.js'],
+  ['人性化隨機失效（牌局裡也照表打）', 'app/js/core/strategy.js', 'if (rng) return HUMAN[personality](cards, up, canDouble, rng);', '', 'tests/check_strategy.js'],
+  ['膽小型偶爾也加倍', 'app/js/core/strategy.js', "if (t <= 11) return 'hit';\n    if (t === 12)", "if (t <= 11) return canDouble && chance(rng, 0.2) ? 'double' : 'hit';\n    if (t === 12)", 'tests/check_strategy.js'],
 ];
 for (const [name, file, from, to, testFile] of MUTANTS) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-mut-'));

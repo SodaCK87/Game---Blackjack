@@ -52,7 +52,8 @@ test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝�
   assert.ok(blackjacks > 100, `只出現 ${blackjacks} 次 Blackjack`);
 });
 
-test('三種個性的長期期望值：穩健（基本策略）比莽撞、膽小都至少少輸 1%', t => {
+// aiChoice 會把牌局的 rng 傳給策略，所以量到的是帶人性化隨機的打法
+test('三種個性的長期期望值：穩健（基本策略帶少量隨機）比莽撞、膽小都至少少輸 1%', t => {
   const ROUNDS = 100000, UNIT = 10;
   const ids = ['steady', 'reckless', 'timid'];
   const g = createGame({

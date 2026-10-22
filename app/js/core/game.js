@@ -149,7 +149,7 @@
 
     function aiChoice(id) {
       const s = seat(id);
-      return strategy.decide(s.personality || 'steady', s.cards, dealer.cards[0], legal(id).includes('double'));
+      return strategy.decide(s.personality || 'steady', s.cards, dealer.cards[0], legal(id).includes('double'), o.rng);
     }
 
     function reveal(events) {

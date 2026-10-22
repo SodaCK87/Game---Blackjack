@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { decide, bet } = require('../app/js/core/strategy.js');
+const { rng } = require('./rng_util');
 
 const h = (...ranks) => ranks.map(rank => ({ rank, suit: 'S' }));
 const up = rank => ({ rank, suit: 'H' });
@@ -66,4 +67,77 @@ test('下注：以 10 為單位、不超過籌碼與上限、不夠最低注就�
   assert.strictEqual(bet('reckless', 50000, fixed, limits), 1000);
   assert.strictEqual(bet('steady', 15, fixed, limits), 10);
   assert.strictEqual(bet('steady', 9, fixed, limits), 0);
+});
+
+// ---- 牌局裡會傳 rng：人性化的隨機 ----
+const N = 4000;
+function tally(personality, cards, d, canDouble, seed = 1) {
+  const r = rng(seed), count = {};
+  for (let i = 0; i < N; i++) {
+    const a = decide(personality, cards, up(d), canDouble, r);
+    count[a] = (count[a] || 0) + 1;
+  }
+  return count;
+}
+
+test('帶亂數時，邊界上的牌會出現不同決定，比例落在設定附近', () => {
+  // [個性, 手牌, 莊家明牌, 少數派的決定, 設定的比例]；容許 ±3%，約是四千次抽樣標準差的四倍以上
+  const cases = [
+    ['reckless', h('10', '7'), '7', 'hit', 0.35],
+    ['reckless', h('10', '6'), '7', 'stand', 0.15],
+    ['reckless', h('5', '4'), 'A', 'hit', 0.15],
+    ['timid', h('10', '2'), '7', 'hit', 0.25],
+    ['timid', h('A', '6'), '7', 'hit', 0.4],
+    ['steady', h('10', '6'), '10', 'stand', 0.08],
+    ['steady', h('6', '5'), '6', 'hit', 0.1],
+  ];
+  for (const [p, cards, d, minority, rate] of cases) {
+    const c = tally(p, cards, d, true);
+    const share = (c[minority] || 0) / N;
+    assert.ok(Math.abs(share - rate) < 0.03, `${p} ${cards.map(x => x.rank).join('+')} 對 ${d}：「${minority}」佔 ${share.toFixed(3)}，設定 ${rate}（${JSON.stringify(c)}）`);
+  }
+});
+
+test('帶亂數時也不做明顯的蠢事', () => {
+  const hard = t => (t <= 11 ? h('2', String(t - 2)) : t <= 20 ? h('10', String(t - 10)) : h('10', '6', '5'));
+  const soft = t => (t === 12 ? h('A', 'A') : h('A', String(t - 11)));
+  const r = rng(9);
+  const bad = [];
+  for (const p of ['steady', 'reckless', 'timid']) {
+    for (const d of ['2', '6', '7', '10', 'A']) {
+      for (const canDouble of [true, false]) {
+        for (let k = 0; k < 200; k++) {
+          for (let t = 5; t <= 21; t++) {
+            const a = decide(p, hard(t), up(d), canDouble, r);
+            if (t >= 19 && a !== 'stand') bad.push(`${p} 硬 ${t} ${a}`);
+            if (!canDouble && a === 'double') bad.push(`${p} 不能加倍卻加倍`);
+            if (p === 'timid' && (a === 'double' || (t >= 14 && a !== 'stand'))) bad.push(`膽小 硬 ${t} ${a}`);
+            if (p === 'steady' && t <= 11 && a === 'stand') bad.push(`穩健 硬 ${t} 停`);
+            if (p === 'reckless' && t <= 15 && a === 'stand') bad.push(`莽撞 硬 ${t} 停`);
+          }
+          for (let t = 12; t <= 21; t++) {
+            const a = decide(p, soft(t), up(d), canDouble, r);
+            if (t >= 19 && a !== 'stand') bad.push(`${p} 軟 ${t} ${a}`);
+            if (t <= 16 && a === 'stand') bad.push(`${p} 軟 ${t} 就停`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepStrictEqual([...new Set(bad)], []);
+});
+
+test('帶亂數的下注：會變化、以 10 為單位、不超出範圍，膽小只下最低注或兩倍', () => {
+  const limits = { minBet: 10, maxBet: 1000, step: 10 };
+  const r = rng(5);
+  for (const [p, bank] of [['steady', 1000], ['reckless', 1000], ['timid', 1000], ['reckless', 120]]) {
+    const seen = new Set();
+    for (let i = 0; i < 2000; i++) {
+      const b = bet(p, bank, r, limits);
+      assert.ok(b % 10 === 0 && b >= 10 && b <= Math.min(1000, bank), `${p} 籌碼 ${bank} 下了 ${b}`);
+      seen.add(b);
+    }
+    if (p === 'timid') assert.deepStrictEqual([...seen].sort((a, b) => a - b), [10, 20]);
+    else assert.ok(seen.size >= 4, `${p} 籌碼 ${bank} 只下過 ${[...seen].join('、')}`);
+  }
 });

@@ -19,6 +19,25 @@
     timid: { win: '贏、贏了？', lose: '唉…', bust: '嗚，爆了…', blackjack: '真的假的！', push: '還好還好。', double: '加、加倍…', stand: '我、我停。', rebuy: '只好再買一點…' },
   };
 
+  // 標籤互相壓到時，由下往上排：上面那個往上讓到不重疊為止（點數標籤本來就在牌的上方，往上讓不會蓋到自己的牌）。
+  // 放在 create 外面，探針才能拿一組故意疊在一起的標籤直接驗它，不必靠運氣等牌局撞出重疊
+  function declutter(els) {
+    const items = els.filter(el => !el.hidden).map(el => ({ el, r: el.getBoundingClientRect(), dy: 0 }));
+    items.sort((a, b) => b.r.top - a.r.top);
+    const box = it => ({ left: it.r.left, right: it.r.right, top: it.r.top + it.dy, bottom: it.r.bottom + it.dy });
+    const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (let i = 1; i < items.length; i++) {
+      for (let guard = 0; guard < items.length; guard++) {
+        const me = box(items[i]);
+        const below = items.slice(0, i).map(box).find(b => hit(me, b));
+        if (!below) break;
+        items[i].dy -= me.bottom - below.top + 2;
+      }
+    }
+    for (const it of items) if (it.dy) it.el.style.top = `${parseFloat(it.el.style.top) + it.dy}px`;
+  }
+  V.declutter = declutter;
+
   // 籌碼存在這台電腦的瀏覽器裡（localStorage）。讀不到、格式不對就當新玩家，不擲錯
   const SAVE_KEY = 'bjk.save.v1';
   function loadSave() {
@@ -119,23 +138,6 @@
         place(el, slot(id, Math.max(0, list.length - 1)).add(new THREE.Vector3(0, 0.45, 0)));
       }
       declutter([...Object.values(totals), ...Object.values(tags)]);
-    }
-
-    // 標籤互相壓到時，由下往上排：上面那個往上讓到不重疊為止（點數標籤本來就在牌的上方，往上讓不會蓋到自己的牌）
-    function declutter(els) {
-      const items = els.filter(el => !el.hidden).map(el => ({ el, r: el.getBoundingClientRect(), dy: 0 }));
-      items.sort((a, b) => b.r.top - a.r.top);
-      const box = it => ({ left: it.r.left, right: it.r.right, top: it.r.top + it.dy, bottom: it.r.bottom + it.dy });
-      const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-      for (let i = 1; i < items.length; i++) {
-        for (let guard = 0; guard < items.length; guard++) {
-          const me = box(items[i]);
-          const below = items.slice(0, i).map(box).find(b => hit(me, b));
-          if (!below) break;
-          items[i].dy -= me.bottom - below.top + 2;
-        }
-      }
-      for (const it of items) if (it.dy) it.el.style.top = `${parseFloat(it.el.style.top) + it.dy}px`;
     }
 
     function say(mood, text) {

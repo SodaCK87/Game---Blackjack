@@ -69,9 +69,14 @@ async function withPage(browser, { size = [1280, 720], mobile = false } = {}, fn
   let client = null;
   const result = { console: [], leftover: -1 };
   try {
+    // 檔案出現了不代表讀得到：瀏覽器還在寫的那一下會 EBUSY（全套平行跑、機器忙的時候撞過），讀到內容才算數
     const portFile = path.join(dir, 'DevToolsActivePort');
-    for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await sleep(100);
-    const port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0];
+    let port = '';
+    for (let i = 0; i < 150 && !port; i++) {
+      try { port = fs.readFileSync(portFile, 'utf8').split(/\r?\n/)[0].trim(); } catch (e) { /* 還沒寫好 */ }
+      if (!port) await sleep(100);
+    }
+    if (!port) throw new Error(`${browser} 15 秒內沒有開出偵錯埠`);
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     const pageTarget = targets.find(t => t.type === 'page');
     client = await connect(pageTarget.webSocketDebuggerUrl);
