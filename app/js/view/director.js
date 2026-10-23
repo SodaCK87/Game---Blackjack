@@ -93,7 +93,7 @@
     let auto = false;
     let roundsPlayed = 0, splits = 0;
     let turnHand = 0;
-    const settledNet = new Map();
+    const settledNet = new Map(), settledBj = new Map();
     const mismatches = [];
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.035, 12, 48), new THREE.MeshBasicMaterial({ color: 0x2ec4c4 }));
@@ -323,17 +323,21 @@
         mesh.rotation.z = e.faceUp ? 0 : Math.PI;
         updateLabels();
       },
+      // 開局的 Blackjack 與分牌後補成的 Blackjack（A＋10 點牌）都走這裡，後者帶的 hand 是分出來的那一手
       async blackjack(e) {
         if (e.seat === 'me') {
-          say('surprised', '哇，Blackjack！');
+          say('surprised', handsOf('me').length > 1 ? `第 ${e.hand + 1} 手 Blackjack！` : '哇，Blackjack！');
           await FX.banner('BLACKJACK!');
         } else {
           popLine(e.seat, 'blackjack');
           await A.wait(500);
         }
       },
+      // 不偷看的規則下，大家都打完了才翻到：講清楚哪些手平手、多押的怎麼算（偷看時開局就翻，桌上只有原注）
       async dealerBlackjack() {
-        say('surprised', '莊家 Blackjack！');
+        const tie = rules.dealerBlackjackPush === 'any21' ? '21 點' : 'Blackjack';
+        const rest = rules.peek ? '' : rules.dealerBlackjackTakes === 'all' ? '，其餘連加倍、分牌的注一起收' : '，其餘只收原注';
+        say('surprised', `莊家 Blackjack！${tie}平手${rest}。`);
         await A.wait(1000);
       },
       async turn(e) {
@@ -353,8 +357,10 @@
         const list = handsOf(e.seat);
         const moved = list[e.hand].cards.pop();
         list.splice(e.hand + 1, 0, { cards: [moved], stacks: [] });
-        if (e.seat === 'me') say('deal', rules.splitOneCard ? '分牌：每一手補一張就停。' : '分牌！');
-        else popLine(e.seat, 'split');
+        if (e.seat === 'me') {
+          const ace = e.card.rank === 'A';
+          say('deal', ace || rules.splitOneCard ? `${ace ? '分 A' : '分牌'}：每一手補一張就停。` : '分牌！每一手照常要牌、停牌。');
+        } else popLine(e.seat, 'split');
         await relayout(e.seat, 380);
         await flyChips(e.seat, e.hand + 1, e.amount, railOf(e.seat), 0);
         updateLabels();
@@ -395,9 +401,11 @@
         } else {
           await collect(id, k, rackPoint);
         }
-        // 分成好幾手時，最後一手結算完才講一次合計
+        // 分成好幾手時，最後一手結算完才講一次合計；中間有 Blackjack 的手（賠 1.5 倍）在合計裡點名
         const net = (settledNet.get(id) || 0) + e.net;
         settledNet.set(id, k === n - 1 ? 0 : net);
+        const bjs = (settledBj.get(id) || []).concat(e.result === 'blackjack' ? [k + 1] : []);
+        settledBj.set(id, k === n - 1 ? [] : bjs);
         if (id === 'me') {
           if (n === 1) {
             if (e.result === 'blackjack') say('smile', `Blackjack 賠 1.5 倍，你贏了 ${e.net}！`);
@@ -406,10 +414,13 @@
             else say('sorry', '可惜，這局莊家贏。');
             if (e.net > 0) FX.coinRain(scene);
           } else if (k === n - 1) {
-            if (net > 0) say('smile', `${n} 手合計贏了 ${net}！`);
-            else if (net < 0) say('sorry', `可惜，${n} 手合計輸了 ${-net}。`);
-            else say('idle', `${n} 手合計打成平手。`);
+            const bjNote = bjs.length ? `第 ${bjs.join('、')} 手 Blackjack 賠 1.5 倍，` : '';
+            if (net > 0) say('smile', `${bjNote}${n} 手合計贏了 ${net}！`);
+            else if (net < 0) say('sorry', `${bjNote || '可惜，'}${n} 手合計輸了 ${-net}。`);
+            else say('idle', `${bjNote}${n} 手合計打成平手。`);
             if (net > 0) FX.coinRain(scene);
+          } else if (e.result === 'blackjack') {
+            say('smile', `第 ${k + 1} 手 Blackjack 賠 1.5 倍，贏 ${e.net}！`);
           }
         } else if (n === 1) {
           popLine(id, e.result);
@@ -522,6 +533,7 @@
         legal: game.legal('me'),
         rules,
         hands: mine.length,
+        index: turnHand,
       });
       lastOdds = { seenCount: seen.length, result };
       return result;

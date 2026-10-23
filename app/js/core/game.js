@@ -10,15 +10,23 @@
 })(globalThis, function (hand, shoeLib, strategy) {
   if (!hand || !shoeLib || !strategy) throw new Error('core 載入順序錯：game.js 要排在 hand.js、shoe.js、strategy.js 之後');
 
-  // 下注以 10 為單位：Blackjack 賠 1.5 倍後仍是 5 的倍數，桌上最小的 5 元籌碼付得出來。
-  // 加倍與分牌的規則是參數（同事定案前試過好幾種），預設值是 2026-10-23 定案的那組：
-  //   doubleOn     'any' 頭兩張任何點數都能加倍；陣列：頭兩張是這幾種硬點數才能加倍（有 A 的軟牌不算）
-  //   splitBy      'value' 點數相同就能分（K+Q 可以）；'rank' 要牌面相同
-  //   splitOneCard 分出來的每一手只補一張就停，補到同點數可以再分或停；false 照一般的手打。A 分開後一律只補一張
-  //   maxHands     一個座位最多分成幾手，Infinity 不限（實際上限是籌碼夠不夠付每一份注）
+  // 下注以 10 為單位：Blackjack 賠 1.5 倍後仍是 5 的倍數，桌上最小面額 5 的籌碼付得出來。
+  // 規則都是參數（同事試玩後改過好幾次），預設值是 v0.11.0 定案的那組，括號裡是舊值：
+  //   maxBet         下注上限，Infinity 不設（最多押上手上全部籌碼）（v0.10 以前 1000）
+  //   doubleOn       'any' 頭兩張任何點數都能加倍；陣列：頭兩張是這幾種硬點數才能加倍（有 A 的軟牌不算）
+  //   splitBy        'value' 點數相同就能分（K+Q 可以）；'rank' 要牌面相同
+  //   splitOneCard   false 分出來的手照一般的手打；true 每一手只補一張就停（v0.10）。A 分開後一律只補一張，
+  //                  只補一張的手補到同點數時可以再分或停
+  //   splitBlackjack 分出來的手頭兩張是 A＋10 點牌，算 Blackjack 賠 1.5 倍；false 只算 21 點（v0.10）
+  //   maxHands       一個座位最多分成幾手，Infinity 不限（實際上限是籌碼夠不夠付每一份注）
+  // 荷官的 Blackjack：
+  //   peek                 false 不偷看，所有座位打完荷官才翻底牌；true 明牌 A 或 10 點牌時先偷看，是 Blackjack 就直接結算（v0.10）
+  //   dealerBlackjackTakes 最後翻出 Blackjack 時，'all' 原注、加倍與分牌多押的全部輸掉；'original' 只輸原注（第一手的那一份），多押的退回
+  //   dealerBlackjackPush  哪些手跟荷官的 Blackjack 平手、退回那一手全部的注：'any21' 21 點就算（不管幾張）；'blackjack' 只有 Blackjack
   const DEFAULTS = {
-    decks: 6, penetration: 0.75, minBet: 10, maxBet: 1000, step: 10,
-    doubleOn: [10, 11], splitBy: 'value', splitOneCard: true, maxHands: Infinity,
+    decks: 6, penetration: 0.75, minBet: 10, maxBet: Infinity, step: 10,
+    doubleOn: [10, 11], splitBy: 'value', splitOneCard: false, splitBlackjack: true, maxHands: Infinity,
+    peek: false, dealerBlackjackTakes: 'all', dealerBlackjackPush: 'any21',
   };
 
   function checkRules(o) {
@@ -26,7 +34,13 @@
       throw new Error(`doubleOn 要是 'any' 或點數陣列，收到 ${JSON.stringify(o.doubleOn)}`);
     }
     if (o.splitBy !== 'value' && o.splitBy !== 'rank') throw new Error(`splitBy 要是 'value' 或 'rank'，收到 ${o.splitBy}`);
+    if (typeof o.splitOneCard !== 'boolean') throw new Error(`splitOneCard 要是 true 或 false，收到 ${o.splitOneCard}`);
+    if (typeof o.splitBlackjack !== 'boolean') throw new Error(`splitBlackjack 要是 true 或 false，收到 ${o.splitBlackjack}`);
     if (!(o.maxHands === Infinity || (Number.isInteger(o.maxHands) && o.maxHands >= 1))) throw new Error(`maxHands 要是正整數或 Infinity，收到 ${o.maxHands}`);
+    if (!(o.maxBet === Infinity || (Number.isInteger(o.maxBet) && o.maxBet >= o.minBet))) throw new Error(`maxBet 要是不小於最低注的整數或 Infinity，收到 ${o.maxBet}`);
+    if (typeof o.peek !== 'boolean') throw new Error(`peek 要是 true 或 false，收到 ${o.peek}`);
+    if (!['all', 'original'].includes(o.dealerBlackjackTakes)) throw new Error(`dealerBlackjackTakes 要是 'all' 或 'original'，收到 ${o.dealerBlackjackTakes}`);
+    if (!['any21', 'blackjack'].includes(o.dealerBlackjackPush)) throw new Error(`dealerBlackjackPush 要是 'any21' 或 'blackjack'，收到 ${o.dealerBlackjackPush}`);
   }
 
   function createGame(options) {
@@ -82,8 +96,8 @@
       return o.splitBy === 'rank' ? a.rank === b.rank : hand.rankValue(a.rank) === hand.rankValue(b.rank);
     }
 
-    // 輪到下一手要做決定的牌：照座位順序、同一座位照手的順序。分出來的手輪到時才補第二張，
-    // 只補一張的手補完就停，除非又湊成可以再分的一對；一般的手補到 21 自動停
+    // 輪到下一手要做決定的牌：照座位順序、同一座位照手的順序。分出來的手輪到時才補第二張：
+    // 補成 A＋10 點牌（splitBlackjack）就是 Blackjack；只補一張的手補完就停，除非又湊成可以再分的一對；一般的手補到 21 自動停
     function advance(events) {
       for (const s of seats) {
         for (let k = 0; k < s.hands.length; k++) {
@@ -91,6 +105,11 @@
           if (h.status !== 'playing') continue;
           if (h.cards.length === 1) {
             toHand(events, s, k);
+            if (o.splitBlackjack && hand.value(h.cards).blackjack) {
+              h.status = 'blackjack';
+              events.push({ type: 'blackjack', seat: s.id, hand: k });
+              continue;
+            }
             if ((h.oneCard && !canSplit(s, h)) || hand.value(h.cards).total === 21) {
               h.status = 'stood';
               events.push({ type: 'stand', seat: s.id, hand: k, auto: true });
@@ -114,7 +133,8 @@
         const s = seat(id);
         if (!amount) continue;
         if (!Number.isInteger(amount) || amount % o.step !== 0) throw new Error(`${s.name} 的下注 ${amount} 不是 ${o.step} 的倍數`);
-        if (amount < o.minBet || amount > o.maxBet) throw new Error(`${s.name} 的下注 ${amount} 超出 ${o.minBet}–${o.maxBet}`);
+        if (amount < o.minBet) throw new Error(`${s.name} 的下注 ${amount} 低於最低注 ${o.minBet}`);
+        if (amount > o.maxBet) throw new Error(`${s.name} 的下注 ${amount} 超過上限 ${o.maxBet}`);
         if (amount > s.bankroll) throw new Error(`${s.name} 的籌碼只有 ${s.bankroll}，不夠下 ${amount}`);
         any = true;
       }
@@ -152,9 +172,10 @@
           events.push({ type: 'blackjack', seat: s.id, hand: 0 });
         }
       }
-      // 明牌是 A 或 10 點牌時荷官先偷看底牌，是 Blackjack 就直接結算，閒家不必再做決定
+      // 偷看（peek）的規則：明牌是 A 或 10 點牌時荷官先偷看底牌，是 Blackjack 就直接結算，閒家不必再做決定。
+      // 預設不偷看：底牌蓋到最後，所有座位照常打完才翻（finishRound）
       const up = dealer.cards[0];
-      if ((up.rank === 'A' || hand.isTen(up.rank)) && hand.value(dealer.cards).blackjack) {
+      if (o.peek && (up.rank === 'A' || hand.isTen(up.rank)) && hand.value(dealer.cards).blackjack) {
         reveal(events);
         events.push({ type: 'dealerBlackjack' });
         settle(events);
@@ -226,7 +247,8 @@
       if (phase !== 'dealer') throw new Error(`現在是 ${phase} 階段，還不到荷官`);
       const events = [];
       reveal(events);
-      // 閒家全爆或全拿 Blackjack 時，荷官不必補牌
+      if (hand.value(dealer.cards).blackjack) events.push({ type: 'dealerBlackjack' });
+      // 閒家全爆或全拿 Blackjack 時，荷官不必補牌（荷官自己是 Blackjack 時已經 21 點，也不補）
       if (seats.some(s => s.hands.some(h => h.status === 'stood'))) {
         while (hand.value(dealer.cards).total < 17) toDealer(events, true);
         if (hand.value(dealer.cards).bust) events.push({ type: 'dealerBust' });
@@ -235,20 +257,35 @@
       return events;
     }
 
+    // 荷官是 Blackjack 時這一手怎麼算（偷看時開局就結算，這時桌上只有原注，兩個參數都碰不到）：
+    // 平手的手退回全部的注（含加倍的那份）；其他的手照 dealerBlackjackTakes 全輸，或只輸第一手的原注、多押的退回。
+    // 只輸原注時，只退一部分的手照樣記 lose／bust，整份退回的記 push
+    function againstDealerBlackjack(h, k) {
+      const v = hand.value(h.cards);
+      const ties = h.status === 'blackjack' || (o.dealerBlackjackPush === 'any21' && !v.bust && v.total === 21);
+      if (ties) return { result: 'push', returned: h.bet };
+      const result = h.status === 'bust' ? 'bust' : 'lose';
+      if (o.dealerBlackjackTakes === 'all') return { result, returned: 0 };
+      const original = h.doubled ? h.bet / 2 : h.bet;
+      return k === 0 ? { result, returned: h.bet - original } : { result: 'push', returned: h.bet };
+    }
+
     // 逐手結算。returned 是退回座位的籌碼（含本金）；net 是這一手的淨輸贏。
-    // 分出來的 A＋10 點牌只是 21 點：status 從來不會是 blackjack，所以照一般的贏賠 1 倍
+    // 分出來的 A＋10 點牌：splitBlackjack 時 advance 把它標成 blackjack，荷官補到 21 點照樣贏 1.5 倍；否則只是 21 點，贏賠 1 倍
     function settle(events) {
       const d = hand.value(dealer.cards);
       for (const s of seats) {
         s.hands.forEach((h, k) => {
           const v = hand.value(h.cards);
-          let result;
-          if (h.status === 'blackjack') result = d.blackjack ? 'push' : 'blackjack';
-          else if (h.status === 'bust') result = 'bust';
-          else if (d.blackjack) result = 'lose';
-          else if (d.bust || v.total > d.total) result = 'win';
-          else result = v.total === d.total ? 'push' : 'lose';
-          const returned = { blackjack: h.bet * 2.5, win: h.bet * 2, push: h.bet, lose: 0, bust: 0 }[result];
+          let result, returned;
+          if (d.blackjack) ({ result, returned } = againstDealerBlackjack(h, k));
+          else {
+            if (h.status === 'blackjack') result = 'blackjack';
+            else if (h.status === 'bust') result = 'bust';
+            else if (d.bust || v.total > d.total) result = 'win';
+            else result = v.total === d.total ? 'push' : 'lose';
+            returned = { blackjack: h.bet * 2.5, win: h.bet * 2, push: h.bet, lose: 0, bust: 0 }[result];
+          }
           const net = returned - h.bet;
           s.bankroll += returned;
           house -= net;

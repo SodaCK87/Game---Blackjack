@@ -75,7 +75,7 @@
         brokeBar.hidden = m !== 'broke';
         if (m === 'bet') bet = BJK.game.prefillBet(lastBet, bankroll, { minBet, maxBet, step });
         if (m === 'act') {
-          // 加倍照舊反灰（看得出這手不能加倍）；分牌鈕能分才出現。分完補到同點數只能再分或停，要牌與加倍收起來
+          // 加倍照舊反灰（看得出這手不能加倍）；分牌鈕能分才出現。分開的 A 又補到 A 只能再分或停，要牌與加倍收起來
           const normal = legal.includes('hit');
           $('hitBtn').hidden = !normal;
           $('doubleBtn').hidden = !normal;

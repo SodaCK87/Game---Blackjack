@@ -10,7 +10,7 @@
 4. `app\` 一律 classic script，不准 `type="module"`、`import`／`export`。2026-10-22 實測 Edge 與 Chrome 在 file:// 下 ES module 被 CORS 擋（同一頁走 http 正常），同事雙擊會一片空白。Three.js 因此由 `npm run build:three` 打包成全域 `THREE` 的 `app\lib\three.js`，不准手改。
 5. 驗證一律 `npm test`（＝`node --test "tests/check_*.js"`；node 24 的 `--test` 給目錄會失敗，要給 glob）。剛 clone 先 `npm ci`。會開無頭 Edge／Chrome，不搶焦點。
    1. 看畫面用 `node tools/shoot.js <前綴>`，桌機 1280×720 與手機 390×844 各一張，落在 `tools\_shots\`；加 `--dealer` 改成荷官五種表情各一張，加 `--round` 改成照正常速度打一局、截下注／輪到你／結算／下一局四張。
-   2. 改了 core 的規則或它的測試之後跑 `npm run mutants`：在暫存複本植入 38 種錯誤，每一種都要有測試變紅（不在 `npm test` 裡）。新增規則時也往 `tests\mutants.js` 的表加一列。
+   2. 改了 core 的規則或它的測試之後跑 `npm run mutants`：先確認沒破壞的基準全綠，再在暫存複本植入 60 種錯誤，每一種都要有具名的測試變紅（不在 `npm test` 裡）。新增規則時也往 `tests\mutants.js` 的表加一列。
    3. 模擬手機尺寸一律走 `tests\browser_util.js` 的 CDP，不要用 `--window-size`：無頭視窗寬度最小被夾在約 500px，要 390 實得 496，截圖只截到左半邊而判準照樣綠。
    4. 推上 main 後 GitHub Actions 會自動發布到 Pages（CI 只跑不開瀏覽器的測試）；workflow 跑完再跑 `node tools/check_live.js`，在線上網址桌機與手機各打兩局、確認線上版本等於本機 `BJK_VER`。
 6. 畫面只照 `game.js` 回傳的事件演，不准自己去讀引擎狀態來擺牌或籌碼。`director.js` 每演完一個事件就拿畫面跟事件累積比、每批事件演完再跟引擎比，不一致記進 `mismatches`，`tests\check_play.js` 讀它。新增事件種類時，`handlers` 與 `checkAfter` 兩處都要加。

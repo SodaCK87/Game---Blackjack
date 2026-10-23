@@ -10,7 +10,7 @@
   const PERSONALITIES = {
     steady: { label: '穩健' },    // 照基本策略
     reckless: { label: '莽撞' },  // 16 點以下都要牌，能加倍的 9–11 點一律加倍，10 點牌以外的對子都分，下注大
-    timid: { label: '膽小' },     // 硬牌 12 點就停，從不加倍，只分 A 與 8，只下最低注
+    timid: { label: '膽小' },     // 硬牌 12 點就停，從不加倍，只分 A 與 8（再成對照樣分），只下最低注
   };
 
   // 莊家明牌換成 2–11（A 算 11）
@@ -20,17 +20,22 @@
   const pairValue = cards => hand.rankValue(cards[0].rank);
   const can = (legal, action) => legal.includes(action);
 
-  // 分牌表：對子的點數（A 是 1）→ 對哪些明牌要分。照 2026-10-23 定案的規則逐張扣牌精確算過（v0.10.0 版本紀錄）：
-  // 分完每手只補一張就停，2、3、4、5、6、10 怎樣都不分，8 對 9、10、A 也不分。
-  // 分完補到同點數時「再分或停」也算過，跟第一次分不分是同一張表
-  const SPLIT = { 1: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 7: [6], 8: [2, 3, 4, 5, 6, 7, 8], 9: [4, 5, 6] };
+  // 分牌表：對子的點數（A 是 1）→ 對哪些明牌要分。照 v0.11.0 的預設規則逐張扣牌算過（版本紀錄 v0.11.0）：
+  // A 以外分完照一般打法、10／11 能加倍、再分不限手數；A 只補一張；分後 A＋10 點牌賠 1.5 倍；
+  // 荷官不偷看，最後翻出 Blackjack 時多押的一起輸、21 點平手，所以 8 對 10、A 不分。
+  // 差不到 2% 的六格另用牌局引擎抽牌模擬確認過方向。再成對時要不要再分，跟第一次分不分是同一張表
+  const SPLIT = {
+    1: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 2: [2, 3, 4, 5, 6, 7], 3: [2, 3, 4, 5, 6, 7], 4: [5, 6],
+    6: [2, 3, 4, 5, 6], 7: [2, 3, 4, 5, 6, 7], 8: [2, 3, 4, 5, 6, 7, 8, 9], 9: [2, 3, 4, 5, 6, 8, 9],
+  };
 
-  // 6 副牌、莊家軟 17 停、不投降的基本策略，分牌照上面的表。
+  // 6 副牌、莊家軟 17 停、不投降的基本策略，分牌照上面的表。荷官不偷看，11 對 10 改成要牌（逐張扣牌算過，
+  // 四種組合都是要牌多，但只多 0.00001 到 0.004）。
   // 表上寫加倍但現在不能加倍時（點數不對、籌碼不夠、要過牌），「加倍或停」停、「加倍或要」要
   function basic(cards, up, legal) {
     const d = upValue(up);
     if (can(legal, 'split') && (SPLIT[pairValue(cards)] || []).includes(d)) return 'split';
-    if (!can(legal, 'hit')) return 'stand';   // 分完補到同點數又不該再分：只剩停
+    if (!can(legal, 'hit')) return 'stand';   // 只補一張的手（A）又成對、卻不該再分：只剩停
     const { total: t, soft } = hand.value(cards);
     const dbl = fallback => (can(legal, 'double') ? 'double' : fallback);
     if (soft) {
@@ -48,7 +53,7 @@
     if (t >= 17) return 'stand';
     if (t >= 13) return d <= 6 ? 'stand' : 'hit';
     if (t === 12) return d >= 4 && d <= 6 ? 'stand' : 'hit';
-    if (t === 11) return d <= 10 ? dbl('hit') : 'hit';
+    if (t === 11) return d <= 9 ? dbl('hit') : 'hit';
     if (t === 10) return d <= 9 ? dbl('hit') : 'hit';
     if (t === 9) return d >= 3 && d <= 6 ? dbl('hit') : 'hit';
     return 'hit';
@@ -67,9 +72,9 @@
   }
 
   function timid(cards, up, legal) {
-    // 只分 A 與 8；分完又成對就停，不想在桌上押更多
+    // 只分 A 與 8（分完又成對照樣再分；分出來的手跟頭兩張的一對看起來一樣，策略分不出來）
     const v = pairValue(cards);
-    if (can(legal, 'split') && can(legal, 'hit') && (v === 1 || v === 8)) return 'split';
+    if (can(legal, 'split') && (v === 1 || v === 8)) return 'split';
     if (!can(legal, 'hit')) return 'stand';
     const { total: t, soft } = hand.value(cards);
     if (soft) return t >= 18 ? 'stand' : 'hit';
@@ -111,10 +116,10 @@
     return 'stand';
   }
 
-  // 膽小：多半 12 點就停，偶爾鼓起勇氣多要一張；從不加倍；A、8 七成會分，分完又成對就停
+  // 膽小：多半 12 點就停，偶爾鼓起勇氣多要一張；從不加倍；A、8 七成會分
   function timidHuman(cards, up, legal, rng) {
     const v = pairValue(cards);
-    if (can(legal, 'split') && can(legal, 'hit') && (v === 1 || v === 8) && chance(rng, 0.7)) return 'split';
+    if (can(legal, 'split') && (v === 1 || v === 8) && chance(rng, 0.7)) return 'split';
     if (!can(legal, 'hit')) return 'stand';
     const { total: t, soft } = hand.value(cards);
     if (soft) {
