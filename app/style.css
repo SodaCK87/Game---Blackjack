@@ -96,34 +96,6 @@ html, body {
   100% { opacity: 0; margin-top: -30px; }
 }
 
-#banner {
-  position: fixed;
-  left: 50%;
-  top: 38%;
-  transform: translate(-50%, -50%);
-  color: var(--gold);
-  font: bold clamp(40px, 9vw, 96px) / 1 var(--font);
-  letter-spacing: 0.06em;
-  text-shadow: 0 0 18px rgba(224, 184, 58, 0.6), 0 4px 0 #6b4f10;
-  pointer-events: none;
-}
-
-#banner[hidden] {
-  display: none;
-}
-
-#banner.show {
-  animation: banner-in 1.4s ease-out forwards;
-}
-
-@keyframes banner-in {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
-  30% { transform: translate(-50%, -50%) scale(1); }
-  80% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
 /* 角落的版本號：回報問題時要說得出是哪一版 */
 #ver {
   position: fixed;

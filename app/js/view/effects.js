@@ -1,4 +1,4 @@
-// 動畫積木：物件沿弧線飛、抖動、金幣雨，以及疊在畫面上的橫幅與座位旁的小對白
+// 動畫積木：物件沿弧線飛、抖動、金幣雨，以及座位旁的小對白（蓋滿畫面的大特效在 showcase.js）
 (function () {
   const V = window.BJK.view;
   const A = V.anim;
@@ -50,24 +50,6 @@
     material.dispose();
   }
 
-  // 畫面正中央的大字（Blackjack、爆牌…），播完自己收掉。avoid 是不能蓋住的範圍（荷官的臉）：
-  // 直式手機荷官放大 2.2 倍，臉正好落在 38% 那一帶，壓到就整條移到臉的下方
-  async function banner(text, ms = 1400, avoid = null) {
-    const el = document.getElementById('banner');
-    el.textContent = text;
-    el.style.top = '';
-    el.hidden = false;
-    if (avoid) {
-      const h = el.offsetHeight, mid = el.offsetTop;
-      if (mid - h / 2 < avoid.bottom && mid + h / 2 > avoid.top) el.style.top = `${avoid.bottom + 8 + h / 2}px`;
-    }
-    el.classList.remove('show');
-    void el.offsetWidth;   // 重新觸發 CSS 動畫
-    el.classList.add('show');
-    await A.wait(ms);
-    el.hidden = true;
-  }
-
   // 疊在牌桌上的字（中心對齊）夾回畫布範圍內：直式手機的牌桌放大到桌緣超出畫面，邊上座位的名牌會跟著出去
   function keepInView(el) {
     const hw = el.offsetWidth / 2 + 4, hh = el.offsetHeight / 2 + 4;
@@ -89,5 +71,5 @@
     el.remove();
   }
 
-  V.fx = { arc, shake, coinRain, banner, pop, keepInView };
+  V.fx = { arc, shake, coinRain, pop, keepInView };
 })();

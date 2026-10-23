@@ -72,6 +72,8 @@
   }
 
   function create({ scene, table: T, dealer, project, render, hud }) {
+    // 少了 showcase.js 要在開頁就說，不要等到第一次 Blackjack 才卡住
+    if (!FX.showcase || !FX.doubleDown) throw new Error('載入順序錯：showcase.js 要排在 director.js 之前');
     const rng = V.rng(Date.now() & 0x7fffffff);
     const saved = loadSave();
     const game = BJK.game.createGame({
@@ -94,7 +96,7 @@
     let roundsPlayed = 0, splits = 0;
     let turnHand = 0;
     const settledNet = new Map(), settledBj = new Map();
-    let bannerShown = false;
+    let showcaseShown = false;
     // 畫面上的籌碼數字照事件一筆一筆加減，不直接讀引擎：引擎一次就把整局結算完，直接讀的話荷官還在翻牌，
     // 籌碼就已經是結算後的數字。每批事件演完 verify() 照舊拿它跟引擎比
     const money = { bank: new Map(), onTable: 0 };
@@ -342,11 +344,11 @@
       async blackjack(e) {
         if (e.seat === 'me') {
           say('surprised', handsOf('me').length > 1 ? `第 ${e.hand + 1} 手 Blackjack！` : '哇，Blackjack！');
-          // 分 A 兩手都中時，1.4 秒的橫幅連播會把一局拖到快 20 秒：同一局只播第一次，之後只靠對白
-          if (bannerShown) await A.wait(500);
+          // 分 A 兩手都中時，2 秒的大特效連播會把一局拖長（BJK-05）：同一局只播第一次，之後只靠對白
+          if (showcaseShown) await A.wait(500);
           else {
-            bannerShown = true;
-            await FX.banner('BLACKJACK!', 1400, dealer.faceRect());
+            showcaseShown = true;
+            await FX.showcase('player');
           }
         } else {
           popLine(e.seat, 'blackjack');
@@ -358,7 +360,7 @@
         const tie = rules.dealerBlackjackPush === 'any21' ? '21 點' : 'Blackjack';
         const rest = rules.peek ? '' : rules.dealerBlackjackTakes === 'all' ? '，其餘連加倍、分牌的注一起收' : '，其餘只收原注';
         say('smile', `莊家 Blackjack！${tie}平手${rest}。`);
-        await A.wait(1000);
+        await FX.showcase('dealer');
       },
       async turn(e) {
         turnHand = e.hand;
@@ -387,6 +389,8 @@
       },
       async double(e) {
         popLine(e.seat, 'double');
+        // 你加倍時先播完大特效（你的手把籌碼彈上桌），才把加倍那疊推上桌
+        if (e.seat === 'me') await FX.doubleDown(e.amount / 2);
         await flyChips(e.seat, e.hand, e.amount / 2, railOf(e.seat), 1);
       },
       async stand(e) {
@@ -458,7 +462,7 @@
         all.forEach(m => scene.remove(m));
         dealerCards = [];
         for (const s of SEATS) hands.set(s.id, []);
-        bannerShown = false;
+        showcaseShown = false;
         updateLabels();
       },
     };

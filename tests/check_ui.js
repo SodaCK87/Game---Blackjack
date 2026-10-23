@@ -773,7 +773,7 @@ test('陽性對照：拿掉顯示訊息那段，沒有 WebGL 與少一支檔都�
   }
 });
 
-// ---- v0.11.1：手機橫幅不蓋荷官的臉、分 A 兩手 Blackjack 橫幅只播一次、荷官 Blackjack 用微笑、籌碼數字跟著結算動畫走 ----
+// ---- v0.11.1 起：大字不蓋荷官的臉、分 A 兩手 Blackjack 大特效只播一次、荷官 Blackjack 用微笑、籌碼數字跟著結算動畫走 ----
 // 對白每換一句就記下當時的表情與籌碼數字
 const WATCH = `
   const seen = [];
@@ -781,64 +781,90 @@ const WATCH = `
     .observe(bubble, { childList: true, characterData: true, subtree: true });
   const at = text => seen.find(x => x.t.startsWith(text));`;
 
-// 你拿 A、K：開局 Blackjack 跳橫幅。正常速度量，橫幅出來 0.6 秒後（放大動畫已經停）跟荷官的臉比
-const BANNER_FACE = `(async () => {
+// BJK-04 的用意是大字不蓋住荷官的臉。v0.12.0 起拿 Blackjack 改播大特效（showcase.js），特效本身就有荷官的大特寫，所以兩張臉都量：
+// 大特寫裡的五官（dealer.js 的 g.face：眉毛、眼睛、鼻子到嘴，表情都在這裡）與畫面上原本荷官的臉（faceRect()）。
+// 大標落定（39%）到播完，每 3% 暫停一次：大標與副標看得到的字（fx_util 的 inkQuad）不准碰到任一張臉，也不准跑出畫面。
+// 大頭框的下緣、下巴與脖子讓大標壓著，那是定案的樣子
+const { FX_SEEK, FX_INK, quadHitsRect } = require('./fx_util');
+const LANDSCAPE = { size: [844, 390], mobile: true };
+const FX_FACE = `(async () => {
   const dl = BJK.view.stage.dealer; await dl.ready;
-  const $ = id => document.getElementById(id), el = $('banner');
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  $('clearBet').click(); document.querySelector('[data-chip="100"]').click(); $('dealBtn').click();
-  let shown = false;
-  for (let t = 0; t < 20000 && !shown; t += 25) { await sleep(25); shown = !el.hidden; }
-  await sleep(600);
-  const r = el.getBoundingClientRect();
-  return { shown, banner: { left: r.left, right: r.right, top: r.top, bottom: r.bottom }, face: dl.faceRect(), vh: innerHeight };
+  ${FX_SEEK}${FX_INK}
+  const rect = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+  const frames = [];
+  for (const kind of ['player', 'dealer']) {
+    BJK.view.anim.speed = 0.05;
+    BJK.view.fx.showcase(kind);
+    const el = document.querySelector('.bigfx');
+    for (let i = 39; i <= 99; i += 3) {
+      await seek(i / 100, 40000);
+      frames.push({ kind, f: i / 100, features: rect(el.querySelector('.bigfx-face .face').getBoundingClientRect()), face: dl.faceRect(),
+        ink: [...el.querySelectorAll('.bigfx-ink')].map(e => ({ text: e.textContent, quad: inkQuad(e), box: rect(e.getBoundingClientRect()) })) });
+    }
+    el.remove();
+  }
+  return { frames, vw: innerWidth, vh: innerHeight };
 })()`;
-const bannerFace = (vp, dir) => withPage(first(), { ...vp, init: rigInit(deal('A', 'K')) }, page => page.goto(url(dir)).then(() => page.evaluate(BANNER_FACE, 40000)));
+function faceProblems(m) {
+  const out = [];
+  for (const fr of m.frames) {
+    for (const t of fr.ink) {
+      const at = `${fr.kind} ${Math.round(fr.f * 100)}% 的「${t.text}」`;
+      // 量法自檢：算出來的字要落在元素自己的框裡，不然是 inkQuad 算錯了
+      if (t.quad.some(([x, y]) => x < t.box.left - 2 || x > t.box.right + 2 || y < t.box.top - 2 || y > t.box.bottom + 2)) out.push(`${at}量法有誤：字跑出自己的框`);
+      if (quadHitsRect(t.quad, fr.features)) out.push(`${at}壓到大特寫的五官`);
+      if (quadHitsRect(t.quad, fr.face)) out.push(`${at}壓到畫面上荷官的臉`);
+      if (t.quad.some(([x, y]) => x < 0 || x > m.vw || y < 0 || y > m.vh)) out.push(`${at}跑出畫面`);
+    }
+  }
+  return [...new Set(out)];
+}
+const fxFace = (vp, dir) => withPage(first(), vp, page => page.goto(url(dir)).then(() => page.evaluate(FX_FACE, 30000)));
 
-test(`${first()}：你拿 Blackjack 時，桌機與手機的橫幅都不蓋住荷官的臉，也還在畫面內`, async () => {
-  for (const vp of [DESKTOP, PHONE]) {
-    const r = await bannerFace(vp, APP), m = r.value, why = `${vp.size.join('×')}：${JSON.stringify(m)}`;
-    assert.ok(m.shown, `沒有跳橫幅：${why}`);
-    assert.ok(!overlaps(m.banner, m.face), `橫幅蓋住荷官的臉：${why}`);
-    assert.ok(m.banner.top >= 0 && m.banner.bottom <= m.vh, `橫幅跑出畫面：${why}`);
+test(`${first()}：Blackjack 大特效的大字，在桌機、直式與橫式手機上都不壓到大特寫裡荷官的五官與畫面上荷官的臉，也還在畫面內（BJK-04）`, async () => {
+  for (const vp of [DESKTOP, PHONE, LANDSCAPE]) {
+    const r = await fxFace(vp, APP), problems = faceProblems(r.value);
+    assert.strictEqual(r.value.frames.length, 42, `量到的格數不對：${vp.size.join('×')}`);
+    assert.deepStrictEqual(problems, [], `${vp.size.join('×')}：${problems.slice(0, 4).join('｜')}`);
     assert.deepStrictEqual(r.console, []);
   }
 });
 
-test('陽性對照：橫幅不避開荷官的臉，手機上要判成蓋住', async () => {
-  const tmp = copyWith(path.join('js', 'view', 'director.js'), "FX.banner('BLACKJACK!', 1400, dealer.faceRect())", "FX.banner('BLACKJACK!', 1400)");
+test('陽性對照：大標放回大特寫正中央，手機上要判成壓到五官與荷官的臉', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'showcase.js'), 'top: calc(40% + ${FACE} / 2 - 0.25em)', 'top: calc(40% - 0.5em)');
   try {
-    const r = await bannerFace(PHONE, tmp);
-    assert.ok(overlaps(r.value.banner, r.value.face), JSON.stringify(r.value));
+    const problems = faceProblems((await fxFace(PHONE, tmp)).value);
+    assert.ok(problems.some(p => /壓到大特寫的五官/.test(p)) && problems.some(p => /壓到畫面上荷官的臉/.test(p)), problems.slice(0, 4).join('｜'));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-// 你拿 A、A 按分牌，兩手都補到 K：兩手都是 Blackjack，荷官補 10 爆牌
+// 你拿 A、A 按分牌，兩手都補到 K：兩手都是 Blackjack，荷官補 10 爆牌。數大特效出現幾次（.bigfx 加進頁面幾次）
 const TWO_BJ = rigInit([...deal('A', 'A'), 'K', 'K', '10']);
 const TWO_BJ_PLAY = `(async () => {${PLAY_UTIL}
-  let banners = 0;
-  new MutationObserver(() => { if (!$('banner').hidden) banners++; }).observe($('banner'), { attributes: true, attributeFilter: ['hidden'] });
+  const shows = [];
+  new MutationObserver(list => list.forEach(m => m.addedNodes.forEach(n => { if (n.classList && n.classList.contains('bigfx')) shows.push(n.dataset.kind); })))
+    .observe(document.body, { childList: true });
   if (hud.dataset.mode === 'act') await press('splitBtn');
   await until(() => hud.dataset.mode === 'bet', 30000);
-  return { banners, said, end: { bank: $('bank').textContent, mismatches: d.mismatches } };
+  return { shows, said, end: { bank: $('bank').textContent, mismatches: d.mismatches } };
 })()`;
 const twoBj = dir => withPage(first(), { ...PHONE, init: TWO_BJ }, page => page.goto(url(dir)).then(() => page.evaluate(TWO_BJ_PLAY, 60000)));
 
-test(`${first()}：分 A 兩手都是 Blackjack 時，橫幅只播一次，兩手都還是有對白、帳對`, async () => {
+test(`${first()}：分 A 兩手都是 Blackjack 時，大特效只播一次，兩手都還是有對白、帳對（BJK-05）`, async () => {
   const r = await twoBj(APP), why = JSON.stringify(r.value);
-  assert.strictEqual(r.value.banners, 1, why);
+  assert.deepStrictEqual(r.value.shows, ['player'], why);
   assert.ok(r.value.said.includes('第 1 手 Blackjack！') && r.value.said.includes('第 2 手 Blackjack！'), why);
   assert.deepStrictEqual(r.value.end, { bank: '1,300', mismatches: [] }, why);
   assert.deepStrictEqual(r.console, []);
 });
 
-test('陽性對照：拿掉「同一局只播一次」，要判成橫幅播了兩次', async () => {
-  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'if (bannerShown) await A.wait(500);', 'if (false) await A.wait(500);');
+test('陽性對照：拿掉「同一局只播一次」，要判成大特效播了兩次', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'if (showcaseShown) await A.wait(500);', 'if (false) await A.wait(500);');
   try {
     const r = await twoBj(tmp);
-    assert.strictEqual(r.value.banners, 2, JSON.stringify(r.value));
+    assert.deepStrictEqual(r.value.shows, ['player', 'player'], JSON.stringify(r.value));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

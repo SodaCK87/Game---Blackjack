@@ -84,8 +84,10 @@
 
   const HEAD_PATH ='M130 118 Q200 66 270 118 L280 196 L272 252 Q258 290 228 304 L172 304 Q142 290 128 252 L120 196 Z';
 
-  function svg(mood) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${VB_W * 2}" height="${VB_H * 2}" viewBox="0 0 ${VB_W} ${VB_H}">
+  // crop 給了就只畫那一塊、大小跟著外框（showcase.js 的荷官大特寫）。五官包在 g.face 裡，探針量它畫在畫面哪裡
+  function svg(mood, crop) {
+    const size = crop ? `width="100%" height="100%" viewBox="${crop}"` : `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="0 0 ${VB_W} ${VB_H}"`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" ${size}>
       ${shape('M164 296 L236 296 L242 350 L158 350 Z', C.skin, 5)}
       ${shape('M200 300 L236 300 L240 346 L210 346 Z', C.shade)}
       ${shape(mood === 'deal' ? TORSO_ARM_UP : TORSO, C.shirt, 5)}
@@ -113,7 +115,7 @@
       ${shape('M120 170 Q108 66 200 54 Q296 62 282 170 Q276 122 254 110 Q230 100 212 116 L200 132 L188 116 Q168 100 146 110 Q124 122 120 170 Z', C.hair, 4)}
       ${line('M150 110 Q166 78 210 64 M178 112 Q198 80 244 70 M226 108 Q246 84 270 94 M134 136 Q140 104 166 86', C.hairHi, 3, ' opacity="0.85"')}
       ${shape('M120 168 L124 212 L132 212 L130 168 Z M282 168 L278 212 L270 212 L272 168 Z', C.hair)}
-      ${FACES[mood]}
+      <g class="face">${FACES[mood]}</g>
       ${mood === 'deal' ? DEAL_ARM : ''}
     </svg>`;
   }
