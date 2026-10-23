@@ -32,6 +32,32 @@ test('README 的〈籌碼存在哪〉講了兩份籌碼，〈遇到問題〉講�
   assert.deepStrictEqual(problems(README), []);
 });
 
+// 加倍與分牌的規則是 game.js 的參數（v0.10.0 前後改過四次）。預設值改了而〈規則〉沒跟著改，同事會照錯的規則玩
+const { DEFAULTS } = require('../app/js/core/game.js');
+const RULE_LINES = [
+  [/10 點或 11 點才能加倍/, '加倍只准頭兩張 10、11 點'],
+  [/K 加 Q/, '分牌看點數（K 加 Q 也能分）'],
+  [/只補一張牌就停/, '分出來的每一手只補一張就停'],
+  [/要分成幾手都可以/, '再分不限手數'],
+];
+function ruleProblems(md) {
+  const rules = section(md, '規則');
+  if (rules === null) return ['少了〈規則〉'];
+  return RULE_LINES.filter(([re]) => !re.test(rules)).map(([, what]) => `〈規則〉沒寫${what}`);
+}
+
+test('README〈規則〉寫的加倍與分牌，就是牌局現在的預設規則', () => {
+  const { doubleOn, splitBy, splitOneCard, maxHands } = DEFAULTS;
+  assert.deepStrictEqual({ doubleOn, splitBy, splitOneCard, maxHands }, { doubleOn: [10, 11], splitBy: 'value', splitOneCard: true, maxHands: Infinity },
+    'game.js 的預設規則改了：README〈規則〉要照實改寫，這支的 RULE_LINES 也要跟著改');
+  assert.deepStrictEqual(ruleProblems(README), []);
+});
+
+test('陽性對照：刪掉〈規則〉裡加倍那一條，要判紅', () => {
+  const noDouble = README.split(/\r?\n/).filter(l => !l.includes('才能加倍')).join('\n');
+  assert.deepStrictEqual(ruleProblems(noDouble), ['〈規則〉沒寫加倍只准頭兩張 10、11 點']);
+});
+
 test('陽性對照：刪掉兩份籌碼那句、或整節〈遇到問題〉，都要判紅', () => {
   const noSplit = README.split(/\r?\n/).filter(l => !(l.includes('網址') && l.includes('雙擊'))).join('\n');
   assert.deepStrictEqual(problems(noSplit), ['〈籌碼存在哪〉沒講網址開和雙擊開各記各的']);

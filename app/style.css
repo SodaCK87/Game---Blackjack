@@ -64,6 +64,13 @@ html, body {
   background: var(--red);
 }
 
+/* 一個座位分成三手以上：標籤縮小，才排得進一個座位的寬度 */
+.total.mini {
+  min-width: 0;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
 .pop {
   padding: 4px 10px;
   border-radius: 10px;
@@ -236,6 +243,10 @@ body[data-fatal] #hud {
   cursor: default;
 }
 
+#hud button[hidden] {
+  display: none;
+}
+
 #hud[data-mode="busy"] .hud-bar {
   visibility: hidden;
 }
@@ -319,6 +330,26 @@ body[data-fatal] #hud {
   .total {
     font-size: 12px;
     padding: 1px 6px;
+  }
+
+  .total.mini {
+    font-size: 10px;
+    padding: 0 3px;
+  }
+
+  /* 動作列最多四顆（能分牌又能加倍時）：勝率拆成「勝」「平」兩行，按鈕就窄得排進一排；
+     上下留白縮小，兩行字仍放得進固定高度的操作列 */
+  #actBar button {
+    padding: 4px 8px;
+  }
+
+  #actBar .odds .sep {
+    display: none;
+  }
+
+  #actBar .odds span {
+    display: block;
+    line-height: 1.2;
   }
 }
 

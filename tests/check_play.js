@@ -1,5 +1,6 @@
 // 守「接上規則引擎之後真的打得起來」：雙擊開頁、自動連打好幾局，每一局都要打完不卡住，
 // 每演完一個事件畫面都要跟事件對得上（導演自己核對，探針讀它的不一致清單），帳要平、主控台要乾淨。
+// 第一局疊好牌，保證打到分牌（還有第二手又成對、再分），之後照常洗牌。
 // 驗不到：動畫好不好看、節奏對不對（看 node tools/shoot.js <前綴> --round 的截圖）；真人按鈕的手感。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -8,20 +9,23 @@ const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('./browser_util');
+const { rigInit, deal } = require('./rig_util');
 
 const APP = path.join(__dirname, '..', 'app');
 const ROUNDS = 8;
 const START_TOTAL = 4000;   // 四個座位各 1000
+// 你拿 8、8 對荷官 6：照阿德的表要分；第一手補 K、第二手補到 8 又成對再分（藍圈要跟到第二手），再補 3、9
+const SPLIT_ROUND = rigInit([...deal('8', '8'), 'K', '8', '3', '9']);
 
 // 在頁面裡加速連打；卡住的話 stuckMs 後回報打到第幾局（正常 8 局約 4 秒）
 async function autoplay(browser, appDir, stuckMs = 25000) {
-  const r = await withPage(browser, { size: [1280, 720] }, async page => {
+  const r = await withPage(browser, { size: [1280, 720], init: SPLIT_ROUND }, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
     return page.evaluate(`(async () => {
       await BJK.view.stage.dealer.ready;
       BJK.view.anim.speed = 40;
       const d = BJK.view.stage.director;
-      const timeout = new Promise(res => setTimeout(() => res({ stuck: true, rounds: d.rounds, mismatches: d.mismatches }), ${stuckMs}));
+      const timeout = new Promise(res => setTimeout(() => res({ stuck: true, rounds: d.rounds, splits: d.splits, mismatches: d.mismatches }), ${stuckMs}));
       const run = d.autoplay(${ROUNDS}).then(x => ({ stuck: false, ...x }));
       return Promise.race([run, timeout]);
     })()`, 40000);
@@ -40,11 +44,12 @@ function brokenCopy(file, from, to) {
 }
 
 for (const browser of availableBrowsers()) {
-  test(`${browser}：自動連打 ${ROUNDS} 局，每局打完、畫面跟得上事件、帳平、主控台乾淨`, async () => {
+  test(`${browser}：自動連打 ${ROUNDS} 局（含分牌、再分），每局打完、畫面跟得上事件、帳平、主控台乾淨`, async () => {
     const r = await autoplay(browser, APP);
-    const why = JSON.stringify({ stuck: r.stuck, rounds: r.rounds, times: r.times, mismatches: r.mismatches, console: r.console });
+    const why = JSON.stringify({ stuck: r.stuck, rounds: r.rounds, splits: r.splits, times: r.times, mismatches: r.mismatches, console: r.console });
     assert.strictEqual(r.stuck, false, `卡住了：${why}`);
     assert.strictEqual(r.rounds, ROUNDS, why);
+    assert.ok(r.splits >= 2, `疊好牌的第一局應該分兩次牌：${why}`);
     assert.deepStrictEqual(r.mismatches, [], `畫面與事件／引擎不一致：${why}`);
     const total = r.state.seats.reduce((a, s) => a + s.bankroll, 0);
     assert.strictEqual(total + r.state.house, START_TOTAL + r.state.topUps, `帳不平：${why}`);
@@ -55,31 +60,35 @@ for (const browser of availableBrowsers()) {
 
 const DIRECTOR = path.join('js', 'view', 'director.js');
 const first = () => availableBrowsers()[0];
-
-test('陽性對照：翻底牌的動畫沒把牌翻過來，要抓到「底牌該翻開卻蓋著」', async () => {
-  const tmp = brokenCopy(DIRECTOR,
-    'rot: { x: 0, y: hole.rotation.y, z: 0 } });\n        hole.rotation.z = 0;',
-    'rot: { x: 0, y: hole.rotation.y, z: Math.PI } });');
+async function caught(from, to, pattern) {
+  const tmp = brokenCopy(DIRECTOR, from, to);
   try {
     const r = await autoplay(first(), tmp);
-    assert.ok(r.mismatches.some(m => /底牌 畫面蓋著，應該翻開/.test(m)), `沒抓到：${JSON.stringify(r.mismatches.slice(0, 3))}`);
+    assert.ok(r.mismatches.some(m => pattern.test(m)), `沒抓到：${JSON.stringify(r.mismatches.slice(0, 3))}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
-});
+}
 
-test('陽性對照：輸的籌碼沒收走，要抓到「結算後籌碼還留在桌上」', async () => {
-  const tmp = brokenCopy(DIRECTOR, 'await collect(id, rackPoint);', '');
-  try {
-    const r = await autoplay(first(), tmp);
-    assert.ok(r.mismatches.some(m => /結算後籌碼還留在桌上/.test(m)), `沒抓到：${JSON.stringify(r.mismatches.slice(0, 3))}`);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
+test('陽性對照：翻底牌的動畫沒把牌翻過來，要抓到「底牌該翻開卻蓋著」', () => caught(
+  'rot: { x: 0, y: hole.rotation.y, z: 0 } });\n        hole.rotation.z = 0;',
+  'rot: { x: 0, y: hole.rotation.y, z: Math.PI } });', /底牌 畫面蓋著，應該翻開/));
+
+test('陽性對照：輸的籌碼沒收走，要抓到「結算後籌碼還留在桌上」', () => caught(
+  'await collect(id, k, rackPoint);', '', /結算後籌碼還留在桌上/));
+
+test('陽性對照：分牌時第二張牌沒移到新的一手，要抓到「畫面與事件的牌對不上」', () => caught(
+  'list.splice(e.hand + 1, 0, { cards: [moved], stacks: [] });',
+  'list.splice(e.hand + 1, 0, { cards: [], stacks: [] }); list[e.hand].cards.push(moved);', /split 之後 你 的牌 畫面/));
+
+test('陽性對照：分牌沒推出新的一份籌碼，要抓到「新的一手沒有自己的籌碼」', () => caught(
+  'await flyChips(e.seat, e.hand + 1, e.amount, railOf(e.seat), 0);', '', /分牌之後新的一手沒有自己的一份籌碼/));
+
+test('陽性對照：藍圈一直停在第一手，輪到第二手時要抓到「藍圈沒有指到那一手」', () => caught(
+  'ringTo(e.seat, e.hand);', 'ringTo(e.seat, 0);', /輪到 你 第 2 手時，藍圈沒有指到那一手/));
 
 test('陽性對照：發牌動畫永遠播不完，要判成卡住而不是一直等', async () => {
-  const tmp = brokenCopy(DIRECTOR, 'await FX.arc(mesh, slot(e.to, k), {', 'await new Promise(() => {}); await FX.arc(mesh, slot(e.to, k), {');
+  const tmp = brokenCopy(DIRECTOR, 'async deal(e) {\n        const mesh', 'async deal(e) {\n        await new Promise(() => {});\n        const mesh');
   try {
     const r = await autoplay(first(), tmp, 5000);
     assert.strictEqual(r.stuck, true, `沒判成卡住：${JSON.stringify({ rounds: r.rounds })}`);

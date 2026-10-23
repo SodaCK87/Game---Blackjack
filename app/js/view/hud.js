@@ -1,4 +1,4 @@
-// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍
+// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍／分牌
 (function () {
   const V = window.BJK.view;
 
@@ -55,7 +55,8 @@
       bet = 0;
       onDeal(amount);
     });
-    for (const [id, action] of [['hitBtn', 'hit'], ['standBtn', 'stand'], ['doubleBtn', 'double']]) {
+    const ACTS = [['hitBtn', 'hit'], ['standBtn', 'stand'], ['doubleBtn', 'double'], ['splitBtn', 'split']];
+    for (const [id, action] of ACTS) {
       $(id).addEventListener('click', () => {
         if (!pendingAction) return;
         const resolve = pendingAction;
@@ -74,20 +75,25 @@
         brokeBar.hidden = m !== 'broke';
         if (m === 'bet') bet = BJK.game.prefillBet(lastBet, bankroll, { minBet, maxBet, step });
         if (m === 'act') {
-          $('hitBtn').disabled = !legal.includes('hit');
-          $('standBtn').disabled = !legal.includes('stand');
-          $('doubleBtn').disabled = !legal.includes('double');
+          // 加倍照舊反灰（看得出這手不能加倍）；分牌鈕能分才出現。分完補到同點數只能再分或停，要牌與加倍收起來
+          const normal = legal.includes('hit');
+          $('hitBtn').hidden = !normal;
+          $('doubleBtn').hidden = !normal;
+          $('splitBtn').hidden = !legal.includes('split');
+          for (const [id, action] of ACTS) $(id).disabled = !legal.includes(action);
         }
         document.getElementById('hud').dataset.mode = m;
         refresh();
       },
       nextAction() { return new Promise(resolve => { pendingAction = resolve; }); },
       // o 是 BJK.odds.forHand 的結果；null 清掉。關掉提示時照樣填，只是 CSS 把它藏起來，打開就看得到。
-      // 平手一起寫：只寫勝的話，18 點對 8 這種平手很多的牌，停牌看起來會比實際差
+      // 平手一起寫：只寫勝的話，18 點對 8 這種平手很多的牌，停牌看起來會比實際差。分牌寫的是分出來每一手的機率
       showOdds(o) {
-        for (const [id, key] of [['hitBtn', 'hit'], ['standBtn', 'stand'], ['doubleBtn', 'double']]) {
+        for (const [id, key] of ACTS) {
           const r = o && o[key];
-          $(id).querySelector('.odds').textContent = r ? `勝 ${pct(r.win)}・平 ${pct(r.push)}` : '';
+          // 勝、平分成兩段：手機上四顆鈕要排進一排，CSS 把它們拆成兩行、藏掉中間的點
+          const part = (text, cls) => Object.assign(document.createElement('span'), { textContent: text, className: cls || '' });
+          $(id).querySelector('.odds').replaceChildren(...(r ? [part(`勝 ${pct(r.win)}`), part('・', 'sep'), part(`平 ${pct(r.push)}`)] : []));
           $(id).title = r ? `勝 ${pct(r.win)}・平 ${pct(r.push)}・輸 ${pct(r.lose)}` : '';
           $(id).classList.toggle('best', !!(r && o.best === key));
         }

@@ -13,7 +13,7 @@ function playOut(g) {
   if (g.state().phase === 'dealer') g.finishRound();
 }
 
-test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝起始＋補給」，沒有人變負數', () => {
+test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝起始＋補給」，沒有人變負數', t => {
   const r = rng(2026);
   const seats = [
     { id: 's0', name: '甲', personality: 'reckless', bankroll: 1000 },
@@ -23,7 +23,7 @@ test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝�
   ];
   const g = createGame({ rng: r, seats });
   const initial = 4000;
-  let shuffles = 0, doubles = 0, blackjacks = 0;
+  let shuffles = 0, doubles = 0, blackjacks = 0, splits = 0, mostHands = 0;
   for (let round = 0; round < 10000; round++) {
     for (const s of g.state().seats) if (s.bankroll < g.rules.minBet) g.topUp(s.id, 1000);
     const bets = {};
@@ -35,10 +35,12 @@ test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝�
       const id = g.state().turn;
       const action = g.aiChoice(id);
       if (action === 'double') doubles++;
+      if (action === 'split') splits++;
       g.act(id, action);
     }
     if (g.state().phase === 'dealer') g.finishRound();
     const st = g.state();
+    mostHands = Math.max(mostHands, ...st.seats.map(s => s.hands.length));
     const total = st.seats.reduce((a, s) => a + s.bankroll, 0);
     if (total + st.house !== initial + st.topUps) {
       assert.fail(`第 ${round} 局帳不平：籌碼 ${total} ＋ 莊家 ${st.house} ≠ 起始 ${initial} ＋ 補給 ${st.topUps}`);
@@ -46,9 +48,12 @@ test('一萬局全 AI 對局：每局結束後「籌碼總和＋莊家盈虧＝�
     const negative = st.seats.find(s => s.bankroll < 0);
     if (negative) assert.fail(`第 ${round} 局 ${negative.name} 的籌碼變成 ${negative.bankroll}`);
   }
-  // 確認這一萬局真的走過重洗、加倍、Blackjack 這些分支，不是一直重複同一種局面
+  // 確認這一萬局真的走過重洗、加倍、分牌（含再分到三手以上）、Blackjack 這些分支，不是一直重複同一種局面
+  t.diagnostic(`重洗 ${shuffles}、加倍 ${doubles}、分牌 ${splits}、Blackjack ${blackjacks} 次；一個座位最多分成 ${mostHands} 手`);
   assert.ok(shuffles > 100, `只洗了 ${shuffles} 次`);
   assert.ok(doubles > 100, `只加倍了 ${doubles} 次`);
+  assert.ok(splits > 100, `只分牌 ${splits} 次`);
+  assert.ok(mostHands >= 3, `一個座位最多只分成 ${mostHands} 手，沒走到再分`);
   assert.ok(blackjacks > 100, `只出現 ${blackjacks} 次 Blackjack`);
 });
 

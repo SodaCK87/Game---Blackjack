@@ -30,7 +30,8 @@ const MEASURE_TURN = `(async () => {
   const rect = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
   const labels = [...document.querySelectorAll('#overlay .total, #overlay .seat-tag')].filter(el => !el.hidden)
     .map(el => ({ text: el.textContent, ...rect(el) }));
-  const buttons = [...document.querySelectorAll('#actBar button')].map(el => ({ text: el.textContent, ...rect(el) }));
+  // 藏起來的鈕（不能分時的分牌鈕）不算：它的框是 0×0，量了只會誤判跑出操作列
+  const buttons = [...document.querySelectorAll('#actBar button')].filter(el => !el.hidden).map(el => ({ text: el.textContent, ...rect(el) }));
   return { reached, labels, buttons, hud: { ...rect(hud), scrollH: hud.scrollHeight, clientH: hud.clientHeight }, vw: innerWidth, vh: innerHeight };
 })()`;
 
@@ -175,11 +176,12 @@ const first = () => availableBrowsers()[0];
 const ODDS_TURN = MEASURE_TURN.replace(/const rect = el =>[\s\S]*$/, `
   const cards = []; s.scene.traverse(o => { if (o.userData.kind === 'card') cards.push(o); });
   const odds = id => { const b = document.getElementById(id); const sm = b.querySelector('.odds');
-    return { text: sm.textContent, shown: getComputedStyle(sm).display !== 'none', disabled: b.disabled, title: b.title,
+    return { text: sm.textContent, shown: !b.hidden && getComputedStyle(sm).display !== 'none', hidden: b.hidden, disabled: b.disabled, title: b.title,
              best: b.classList.contains('best'), badge: getComputedStyle(b, '::after').display !== 'none' && getComputedStyle(b, '::after').content === '"建議"' }; };
-  const on = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
+  const all = () => ({ hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn'), split: odds('splitBtn') });
+  const on = all();
   document.getElementById('oddsToggle').click();
-  const off = { hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn') };
+  const off = all();
   return { reached, on, off, seenCount: s.director.lastOdds && s.director.lastOdds.seenCount,
            calcBest: s.director.lastOdds && s.director.lastOdds.result.best,
            faceUp: cards.filter(m => m.rotation.z === 0).length, onTable: cards.length,
@@ -206,14 +208,18 @@ test(`${first()}：輪到你時每個動作標出勝率，只用翻開的牌算�
   }
   if (m.on.double.disabled) assert.strictEqual(m.on.double.text, '', why);
   else assert.match(m.on.double.text, /^勝 \d{1,3}%・平 \d{1,3}%$/, why);
+  // 分牌鈕不能分時藏起來、不標勝率；能分時跟其他鈕一樣標
+  assert.strictEqual(m.on.split.hidden, m.on.split.disabled, why);
+  if (m.on.split.hidden) assert.strictEqual(m.on.split.text, '', why);
+  else assert.match(m.on.split.text, /^勝 \d{1,3}%・平 \d{1,3}%$/, why);
   // 建議：剛好一顆、就是計算結果挑的那顆、看得到「建議」小牌；關掉提示後小牌也藏起來
-  const marked = ['hit', 'stand', 'double'].filter(k => m.on[k].best);
+  const marked = ['hit', 'stand', 'double', 'split'].filter(k => m.on[k].best);
   assert.deepStrictEqual(marked, [m.calcBest], `標建議的按鈕不對：${why}`);
   assert.ok(m.on[m.calcBest].badge, `看不到「建議」小牌：${why}`);
   assert.ok(!m.off[m.calcBest].badge, `關掉提示後「建議」還在：${why}`);
   assert.strictEqual(m.seenCount, m.faceUp, `算勝率用的牌數不等於桌上翻開的牌數：${why}`);
   assert.strictEqual(m.faceUp, m.onTable - 1, `輪到你時桌上應該只有荷官底牌蓋著：${why}`);
-  assert.ok(['hit', 'stand', 'double'].every(k => !m.off[k].shown), `關掉之後還看得到：${why}`);
+  assert.ok(['hit', 'stand', 'double', 'split'].every(k => !m.off[k].shown), `關掉之後還看得到：${why}`);
   assert.strictEqual(m.toggleText, '勝率提示：關');
   assert.deepStrictEqual(m.pref, { odds: false });
   assert.deepStrictEqual(after, { pressed: 'false', text: '勝率提示：關' });
@@ -224,7 +230,7 @@ test('陽性對照：按鈕沒標建議時，要抓到「標建議的按鈕不�
   const tmp = copyWith(path.join('js', 'view', 'hud.js'), "$(id).classList.toggle('best', !!(r && o.best === key));", '');
   try {
     const r = await withPage(first(), PHONE, page => page.goto(url(tmp)).then(() => page.evaluate(ODDS_TURN, 30000)));
-    const marked = ['hit', 'stand', 'double'].filter(k => r.value.on[k].best);
+    const marked = ['hit', 'stand', 'double', 'split'].filter(k => r.value.on[k].best);
     assert.notDeepStrictEqual(marked, [r.value.calcBest], JSON.stringify(r.value));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -370,6 +376,183 @@ test('陽性對照：預填的注改回不取整，剩 15 時按發牌要判成�
     assert.deepStrictEqual(r.value.before, { mode: 'bet', bank: '15', bet: '15' });
     assert.strictEqual(r.value.started, false);
     assert.ok(r.console.some(l => /不是 10 的倍數/.test(l)), `主控台沒有引擎擲錯的訊息：${JSON.stringify(r.console)}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- 分牌（v0.10.0）：疊好牌（rig_util.js）才每次都打得到 ----
+const { rigInit, deal, splitInto } = require('./rig_util');
+// 下注 100、發牌，等到輪到你；click 後先等操作列離開 act，免得同一拍讀到還沒切換的舊狀態
+const PLAY_UTIL = `
+  await BJK.view.stage.dealer.ready; BJK.view.anim.speed = 40;
+  const $ = id => document.getElementById(id), hud = $('hud'), d = BJK.view.stage.director;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 25) await sleep(25); return ok(); };
+  const press = async id => { $(id).click(); await until(() => hud.dataset.mode !== 'act', 2000); await until(() => hud.dataset.mode === 'act' || hud.dataset.mode === 'bet', 20000); };
+  const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  const buttons = () => Object.fromEntries(['hitBtn', 'standBtn', 'doubleBtn', 'splitBtn'].map(id => [id,
+    { shown: !$(id).hidden, disabled: $(id).disabled, odds: $(id).querySelector('.odds').textContent, best: $(id).classList.contains('best') }]));
+  $('clearBet').click(); document.querySelector('[data-chip="100"]').click(); $('dealBtn').click();
+  await until(() => hud.dataset.mode === 'act', 15000);`;
+
+// 你拿 8、8 對荷官 6（16 點）：按分牌 → 第一手又補到 8，只剩「停牌」「分牌」→ 再按分牌 → 三手補 K、3、9，荷官補 10 爆牌
+const SPLIT_CLICK = rigInit([...deal('8', '8'), '8', 'K', '3', '9', '10']);
+const CLICK_SPLIT = `(async () => {${PLAY_UTIL}
+  const first = buttons();
+  await press('splitBtn');
+  const again = { mode: hud.dataset.mode, buttons: buttons(), hands: d.hands('me').length, bubble: $('bubble').textContent };
+  if (again.mode === 'act') await press('splitBtn');
+  await until(() => hud.dataset.mode === 'bet', 20000);
+  return { first, again, end: { mode: hud.dataset.mode, bank: $('bank').textContent, splits: d.splits, mismatches: d.mismatches, bubble: $('bubble').textContent } };
+})()`;
+const clickSplit = dir => withPage(first(), { ...PHONE, init: SPLIT_CLICK }, page => page.goto(url(dir)).then(() => page.evaluate(CLICK_SPLIT, 60000)));
+
+test(`${first()}：按「分牌」真的分成兩手；又成對時只剩停牌與分牌，再按分成三手，三手逐手結算`, async () => {
+  const r = await clickSplit(APP);
+  const { first: f, again, end } = r.value, why = JSON.stringify(r.value);
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(f).map(([k, b]) => [k, [b.shown, b.disabled]])),
+    { hitBtn: [true, false], standBtn: [true, false], doubleBtn: [true, true], splitBtn: [true, false] }, `16 點的一對：加倍反灰、分牌可按：${why}`);
+  assert.match(f.splitBtn.odds, /^勝 \d{1,3}%・平 \d{1,3}%$/, why);
+  assert.ok(f.splitBtn.best, `8+8 對 6 該建議分牌：${why}`);
+  assert.strictEqual(again.mode, 'act', why);
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(again.buttons).map(([k, b]) => [k, b.shown])),
+    { hitBtn: false, standBtn: true, doubleBtn: false, splitBtn: true }, `又成對時只該有停牌與分牌：${why}`);
+  assert.strictEqual(again.hands, 2, why);
+  assert.match(again.bubble, /又是一對/, why);
+  assert.deepStrictEqual(end, { mode: 'bet', bank: '1,300', splits: 2, mismatches: [], bubble: '3 手合計贏了 300！' }, why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：分牌鈕接成停牌，按下去要判成沒分', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'hud.js'), "['splitBtn', 'split']", "['splitBtn', 'stand']");
+  try {
+    const r = await clickSplit(tmp);
+    assert.notStrictEqual(r.value.again.mode, 'act', JSON.stringify(r.value));
+    assert.strictEqual(r.value.end.splits, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 5+5 對 6：點數 10 能加倍、又是一對能分，四顆鈕全出現而且都標勝率——動作列最擠的時候
+const FOUR = rigInit(deal('5', '5'));
+const FOUR_BUTTONS = `(async () => {${PLAY_UTIL}
+  return { buttons: [...document.querySelectorAll('#actBar button')].filter(el => !el.hidden).map(el => ({ text: el.textContent, ...box(el) })),
+           hud: { ...box(hud), scrollH: hud.scrollHeight, clientH: hud.clientHeight } };
+})()`;
+const fourButtons = (browser, vp, dir) => withPage(browser, { ...vp, init: FOUR }, page => page.goto(url(dir)).then(() => page.evaluate(FOUR_BUTTONS, 30000)));
+for (const browser of availableBrowsers()) {
+  for (const [name, vp] of [['手機', PHONE], ['小手機', SMALL_PHONE]]) {
+    test(`${browser}：${name}上能分牌又能加倍時，四顆動作鈕都標勝率、排在同一列不超出操作列`, async () => {
+      const r = await fourButtons(browser, vp, APP), m = r.value;
+      assert.deepStrictEqual(m.buttons.map(b => b.text.slice(0, 2)), ['要牌', '停牌', '加倍', '分牌'], JSON.stringify(m));
+      for (const b of m.buttons) assert.match(b.text, /勝 \d{1,3}%・平 \d{1,3}%$/, JSON.stringify(m));
+      assertButtonsFit(m, '四顆的動作列');
+      assert.deepStrictEqual(r.console, []);
+    });
+  }
+}
+
+test('陽性對照：手機上勝率不拆兩行，四顆動作鈕要判成換行超出', async () => {
+  const tmp = copyWith('style.css', '#actBar .odds span {\n    display: block;', '#actBar .odds span {\n    display: inline;');
+  try {
+    const r = await fourButtons(first(), SMALL_PHONE, tmp);
+    assert.throws(() => assertButtonsFit(r.value, '四顆的動作列'), /換行|同一列|跑出/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 一個座位分成很多手：停在最後一手又成對、問你再分或停的那一刻（畫面靜止），量每一手的牌（四個角投影成四邊形）、
+// 籌碼（外接盒投影）、點數標籤，跟其他手、其他座位、荷官的牌與名牌兩兩比，不准重疊、不准跑出牌桌畫布
+const MANY_HANDS = n => `(async () => {${PLAY_UTIL}
+  for (let i = 0; i < ${n} - 1 && hud.dataset.mode === 'act'; i++) await press('splitBtn');
+  const s = BJK.view.stage, c = $('table');
+  const proj = v => { const p = v.clone().project(s.camera); return [(p.x + 1) / 2 * c.clientWidth, (1 - p.y) / 2 * c.clientHeight]; };
+  const rectPoly = (l, t, r, b) => [[l, t], [r, t], [r, b], [l, b]];
+  const quad = m => { const g = m.geometry.parameters; m.updateMatrixWorld();
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => proj(new THREE.Vector3(a * g.width / 2, g.height / 2, b * g.depth / 2).applyMatrix4(m.matrixWorld))); };
+  // 籌碼疊照真的圓柱量：底面與頂面各取 16 點投影後取凸包。世界軸向的外接盒在籌碼轉了角度時會胖到 1.4 倍，量出假重疊
+  const hull = pts => { pts = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), half = list => {
+      const out = []; for (const p of list) { while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop(); out.push(p); } return out.slice(0, -1); };
+    return half(pts).concat(half(pts.slice().reverse())); };
+  const outline = st => { const p = st.getWorldPosition(new THREE.Vector3()), r = BJK.view.chips.R * st.scale.x, h = st.children.length * BJK.view.chips.H * st.scale.x, pts = [];
+    for (let i = 0; i < 16; i++) { const a = i / 8 * Math.PI; for (const y of [0, h]) pts.push(proj(new THREE.Vector3(p.x + r * Math.cos(a), p.y + y, p.z + r * Math.sin(a)))); }
+    return hull(pts); };
+  const dom = el => { const r = el.getBoundingClientRect(); return rectPoly(r.left, r.top, r.right, r.bottom); };
+  const ids = ['tiger', 'me', 'ade', 'mei'];
+  const mine = new Set(ids.flatMap(id => d.hands(id).flatMap(h => h.cards)));
+  const handLabels = new Set(ids.flatMap(id => d.labels(id)));
+  const dealerCards = []; s.scene.traverse(o => { if (o.userData.kind === 'card' && !mine.has(o)) dealerCards.push(quad(o)); });
+  return {
+    mode: hud.dataset.mode, vw: c.clientWidth, vh: c.clientHeight,
+    seats: ids.map(id => ({ id, hands: d.hands(id).map((h, k) => ({ cards: h.cards.map(quad), chips: h.stacks.map(outline),
+      label: d.labels(id)[k] && !d.labels(id)[k].hidden ? dom(d.labels(id)[k]) : null })) })),
+    others: [...[...document.querySelectorAll('#overlay .total, #overlay .seat-tag')].filter(el => !el.hidden && !handLabels.has(el)).map(dom), ...dealerCards],
+  };
+})()`;
+
+// 兩個凸多邊形有沒有重疊（分離軸定理）；只碰到邊、重疊不到 0.5px 的不算
+function polysOverlap(a, b) {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+      const nx = y2 - y1, ny = x1 - x2, len = Math.hypot(nx, ny) || 1;
+      const pa = a.map(p => (p[0] * nx + p[1] * ny) / len), pb = b.map(p => (p[0] * nx + p[1] * ny) / len);
+      if (Math.max(...pa) <= Math.min(...pb) + 0.5 || Math.max(...pb) <= Math.min(...pa) + 0.5) return false;
+    }
+  }
+  return true;
+}
+// 你的每一手對所有其他手（自己的與別人的）、荷官的牌與名牌：牌、籌碼、標籤兩兩都不准重疊；自己這一手的牌與標籤之間不比
+function layoutProblems(m) {
+  const out = [];
+  const items = m.seats.flatMap(s => s.hands.map((h, k) => ({ who: `${s.id} 第 ${k + 1} 手`, seat: s.id, k, parts: { 牌: h.cards, 籌碼: h.chips, 標籤: h.label ? [h.label] : [] } })));
+  const hits = (pa, pb) => pa.some(p => pb.some(q => polysOverlap(p, q)));
+  for (const a of items.filter(x => x.seat === 'me')) {
+    for (const b of items) {
+      if (a === b || (b.seat === 'me' && b.k < a.k)) continue;
+      for (const [na, pa] of Object.entries(a.parts)) for (const [nb, pb] of Object.entries(b.parts)) if (hits(pa, pb)) out.push(`${a.who}的${na}壓到${b.who}的${nb}`);
+    }
+    for (const [na, pa] of Object.entries(a.parts)) {
+      if (hits(pa, m.others)) out.push(`${a.who}的${na}壓到荷官的牌、荷官點數或名牌`);
+      if (pa.flat().some(([x, y]) => x < 0 || x > m.vw || y < 0 || y > m.vh)) out.push(`${a.who}的${na}跑出牌桌畫面`);
+    }
+  }
+  return [...new Set(out)];
+}
+const manyHands = (vp, n, dir) => withPage(first(), { ...vp, init: rigInit(splitInto(n)) }, page => page.goto(url(dir)).then(() => page.evaluate(MANY_HANDS(n), 90000)));
+
+for (const [name, vp, n] of [['桌機', DESKTOP, 8], ['手機', PHONE, 8], ['小手機', SMALL_PHONE, 8], ['手機', PHONE, 6]]) {
+  test(`${first()}：${name}上你分成 ${n} 手時，每一手的牌、籌碼、點數標籤互不重疊，也不壓到別的座位、不跑出畫面`, async () => {
+    const r = await manyHands(vp, n, APP), m = r.value;
+    const me = m.seats.find(s => s.id === 'me');
+    assert.strictEqual(m.mode, 'act', '沒停在最後一手又成對的那一刻');
+    assert.strictEqual(me.hands.length, n);
+    assert.ok(me.hands.every(h => h.cards.length === 2 && h.chips.length === 1 && h.label), `每一手都該有兩張牌、一疊籌碼、一個標籤：${JSON.stringify(me.hands.map(h => [h.cards.length, h.chips.length, !!h.label]))}`);
+    assert.deepStrictEqual(layoutProblems(m), []);
+    assert.deepStrictEqual(r.console, []);
+  });
+}
+
+test('陽性對照：好幾手全擺在同一個位置，要判成牌與標籤互相壓住', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'return { row, rows, x: (col - (inRow - 1) / 2) * cw, cw, s };', 'return { row, rows, x: 0, cw, s };');
+  try {
+    const r = await manyHands(PHONE, 8, tmp);
+    const problems = layoutProblems(r.value);
+    assert.ok(problems.some(p => /me 第 \d 手的牌壓到me 第 \d 手的牌/.test(p)), `沒抓到：${problems.slice(0, 3).join('｜')}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：外排的籌碼擠到裡排籌碼的位置，要判成籌碼互相壓住', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'chipR = R_HAND - 0.1 + 1.185 * a.s;', 'chipR = R_HAND - 0.1 + 0.7 * a.s;');
+  try {
+    const problems = layoutProblems((await manyHands(PHONE, 8, tmp)).value);
+    assert.ok(problems.some(p => /的籌碼壓到me 第 \d 手的籌碼/.test(p)), `沒抓到：${problems.slice(0, 3).join('｜')}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
