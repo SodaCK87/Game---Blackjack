@@ -94,6 +94,22 @@
     let roundsPlayed = 0, splits = 0;
     let turnHand = 0;
     const settledNet = new Map(), settledBj = new Map();
+    let bannerShown = false;
+    // 畫面上的籌碼數字照事件一筆一筆加減，不直接讀引擎：引擎一次就把整局結算完，直接讀的話荷官還在翻牌，
+    // 籌碼就已經是結算後的數字。每批事件演完 verify() 照舊拿它跟引擎比
+    const money = { bank: new Map(), onTable: 0 };
+    function syncMoney() {
+      const st = game.state();
+      for (const s of st.seats) money.bank.set(s.id, s.bankroll);
+      money.onTable = st.seats.find(s => s.id === 'me').totalBet;
+    }
+    function applyMoney(e) {
+      const delta = { bet: -e.amount, split: -e.amount, double: -e.amount / 2, settle: e.bet + e.net }[e.type];
+      if (delta === undefined || !money.bank.has(e.seat)) return;
+      money.bank.set(e.seat, money.bank.get(e.seat) + delta);
+      if (e.seat === 'me') money.onTable -= e.type === 'settle' ? e.bet : delta;
+    }
+    syncMoney();
     const mismatches = [];
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.035, 12, 48), new THREE.MeshBasicMaterial({ color: 0x2ec4c4 }));
@@ -199,13 +215,12 @@
       const st = game.state();
       for (const s of st.seats) {
         if (tags[s.id]) {
-          tags[s.id].innerHTML = `<b>${s.name}</b>${s.bankroll.toLocaleString()}`;
+          tags[s.id].innerHTML = `<b>${s.name}</b>${money.bank.get(s.id).toLocaleString()}`;
           tags[s.id].hidden = false;
           place(tags[s.id], railOf(s.id).setY(0));
         }
       }
-      const me = st.seats.find(s => s.id === 'me');
-      hud.setBank(me.bankroll, me.totalBet);
+      hud.setBank(money.bank.get('me'), money.onTable);
       const shown = [];
       for (const s of SEATS) {
         const list = handsOf(s.id), n = list.length, placed = [];
@@ -327,7 +342,12 @@
       async blackjack(e) {
         if (e.seat === 'me') {
           say('surprised', handsOf('me').length > 1 ? `第 ${e.hand + 1} 手 Blackjack！` : '哇，Blackjack！');
-          await FX.banner('BLACKJACK!');
+          // 分 A 兩手都中時，1.4 秒的橫幅連播會把一局拖到快 20 秒：同一局只播第一次，之後只靠對白
+          if (bannerShown) await A.wait(500);
+          else {
+            bannerShown = true;
+            await FX.banner('BLACKJACK!', 1400, dealer.faceRect());
+          }
         } else {
           popLine(e.seat, 'blackjack');
           await A.wait(500);
@@ -337,7 +357,7 @@
       async dealerBlackjack() {
         const tie = rules.dealerBlackjackPush === 'any21' ? '21 點' : 'Blackjack';
         const rest = rules.peek ? '' : rules.dealerBlackjackTakes === 'all' ? '，其餘連加倍、分牌的注一起收' : '，其餘只收原注';
-        say('surprised', `莊家 Blackjack！${tie}平手${rest}。`);
+        say('smile', `莊家 Blackjack！${tie}平手${rest}。`);
         await A.wait(1000);
       },
       async turn(e) {
@@ -438,6 +458,7 @@
         all.forEach(m => scene.remove(m));
         dealerCards = [];
         for (const s of SEATS) hands.set(s.id, []);
+        bannerShown = false;
         updateLabels();
       },
     };
@@ -448,10 +469,12 @@
         if (events[i].type === 'bet') {
           const group = [];
           while (i < events.length && events[i].type === 'bet') group.push(events[i++]);
+          group.forEach(applyMoney);
           await Promise.all(group.map(e => handlers.bet(e)));
           group.forEach(checkAfter);
         } else {
           const e = events[i++];
+          applyMoney(e);
           if (handlers[e.type]) await handlers[e.type](e);
           checkAfter(e);
         }
@@ -547,6 +570,7 @@
           popLine(s.id, 'rebuy');
         }
       }
+      syncMoney();
       const bets = { me: playerBet };
       for (const s of game.state().seats) {
         if (s.personality) bets[s.id] = BJK.strategy.bet(s.personality, s.bankroll, rng, rules);
@@ -575,6 +599,7 @@
 
     function enterBetting() {
       save();
+      syncMoney();
       updateLabels();
       const me = game.state().seats.find(s => s.id === 'me');
       if (me.bankroll < rules.minBet) {

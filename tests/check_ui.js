@@ -772,3 +772,128 @@ test('陽性對照：拿掉顯示訊息那段，沒有 WebGL 與少一支檔都�
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ---- v0.11.1：手機橫幅不蓋荷官的臉、分 A 兩手 Blackjack 橫幅只播一次、荷官 Blackjack 用微笑、籌碼數字跟著結算動畫走 ----
+// 對白每換一句就記下當時的表情與籌碼數字
+const WATCH = `
+  const seen = [];
+  new MutationObserver(() => seen.push({ t: bubble.textContent, mood: BJK.view.stage.dealer.mood, bank: $('bank').textContent }))
+    .observe(bubble, { childList: true, characterData: true, subtree: true });
+  const at = text => seen.find(x => x.t.startsWith(text));`;
+
+// 你拿 A、K：開局 Blackjack 跳橫幅。正常速度量，橫幅出來 0.6 秒後（放大動畫已經停）跟荷官的臉比
+const BANNER_FACE = `(async () => {
+  const dl = BJK.view.stage.dealer; await dl.ready;
+  const $ = id => document.getElementById(id), el = $('banner');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  $('clearBet').click(); document.querySelector('[data-chip="100"]').click(); $('dealBtn').click();
+  let shown = false;
+  for (let t = 0; t < 20000 && !shown; t += 25) { await sleep(25); shown = !el.hidden; }
+  await sleep(600);
+  const r = el.getBoundingClientRect();
+  return { shown, banner: { left: r.left, right: r.right, top: r.top, bottom: r.bottom }, face: dl.faceRect(), vh: innerHeight };
+})()`;
+const bannerFace = (vp, dir) => withPage(first(), { ...vp, init: rigInit(deal('A', 'K')) }, page => page.goto(url(dir)).then(() => page.evaluate(BANNER_FACE, 40000)));
+
+test(`${first()}：你拿 Blackjack 時，桌機與手機的橫幅都不蓋住荷官的臉，也還在畫面內`, async () => {
+  for (const vp of [DESKTOP, PHONE]) {
+    const r = await bannerFace(vp, APP), m = r.value, why = `${vp.size.join('×')}：${JSON.stringify(m)}`;
+    assert.ok(m.shown, `沒有跳橫幅：${why}`);
+    assert.ok(!overlaps(m.banner, m.face), `橫幅蓋住荷官的臉：${why}`);
+    assert.ok(m.banner.top >= 0 && m.banner.bottom <= m.vh, `橫幅跑出畫面：${why}`);
+    assert.deepStrictEqual(r.console, []);
+  }
+});
+
+test('陽性對照：橫幅不避開荷官的臉，手機上要判成蓋住', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), "FX.banner('BLACKJACK!', 1400, dealer.faceRect())", "FX.banner('BLACKJACK!', 1400)");
+  try {
+    const r = await bannerFace(PHONE, tmp);
+    assert.ok(overlaps(r.value.banner, r.value.face), JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 你拿 A、A 按分牌，兩手都補到 K：兩手都是 Blackjack，荷官補 10 爆牌
+const TWO_BJ = rigInit([...deal('A', 'A'), 'K', 'K', '10']);
+const TWO_BJ_PLAY = `(async () => {${PLAY_UTIL}
+  let banners = 0;
+  new MutationObserver(() => { if (!$('banner').hidden) banners++; }).observe($('banner'), { attributes: true, attributeFilter: ['hidden'] });
+  if (hud.dataset.mode === 'act') await press('splitBtn');
+  await until(() => hud.dataset.mode === 'bet', 30000);
+  return { banners, said, end: { bank: $('bank').textContent, mismatches: d.mismatches } };
+})()`;
+const twoBj = dir => withPage(first(), { ...PHONE, init: TWO_BJ }, page => page.goto(url(dir)).then(() => page.evaluate(TWO_BJ_PLAY, 60000)));
+
+test(`${first()}：分 A 兩手都是 Blackjack 時，橫幅只播一次，兩手都還是有對白、帳對`, async () => {
+  const r = await twoBj(APP), why = JSON.stringify(r.value);
+  assert.strictEqual(r.value.banners, 1, why);
+  assert.ok(r.value.said.includes('第 1 手 Blackjack！') && r.value.said.includes('第 2 手 Blackjack！'), why);
+  assert.deepStrictEqual(r.value.end, { bank: '1,300', mismatches: [] }, why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：拿掉「同一局只播一次」，要判成橫幅播了兩次', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'if (bannerShown) await A.wait(500);', 'if (false) await A.wait(500);');
+  try {
+    const r = await twoBj(tmp);
+    assert.strictEqual(r.value.banners, 2, JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 荷官最後翻出 Blackjack（同 LATE_BJ：你 5+6 加倍補 K 成 21 點平手）：講「莊家 Blackjack」時是微笑
+const DEALER_BJ_MOOD = `(async () => {${PLAY_UTIL}${WATCH}
+  if (hud.dataset.mode === 'act') $('doubleBtn').click();
+  await until(() => hud.dataset.mode === 'bet', 30000);
+  return { bj: at('莊家 Blackjack'), seen };
+})()`;
+const dealerBjMood = dir => withPage(first(), { ...DESKTOP, init: LATE_BJ }, page => page.goto(url(dir)).then(() => page.evaluate(DEALER_BJ_MOOD, 60000)));
+
+test(`${first()}：荷官翻出 Blackjack 時是微笑，不是驚訝`, async () => {
+  const r = await dealerBjMood(APP), why = JSON.stringify(r.value);
+  assert.ok(r.value.bj, `沒講莊家 Blackjack：${why}`);
+  assert.strictEqual(r.value.bj.mood, 'smile', why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：荷官 Blackjack 改回驚訝臉，要判成表情不對', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), "say('smile', `莊家 Blackjack！", "say('surprised', `莊家 Blackjack！");
+  try {
+    const r = await dealerBjMood(tmp);
+    assert.strictEqual(r.value.bj.mood, 'surprised', JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 你拿 10、10 停牌，荷官 6+10 補 K 爆牌：翻底牌時籌碼還是押注後的 900，結算完才變 1,100
+const WIN_LATE = rigInit([...deal('10', '10'), 'K']);
+const BANK_TIMING = `(async () => {${PLAY_UTIL}${WATCH}
+  if (hud.dataset.mode === 'act') await press('standBtn');
+  await until(() => hud.dataset.mode === 'bet', 30000);
+  return { reveal: at('翻開底牌'), bust: at('我爆牌了'), end: { bank: $('bank').textContent, mismatches: d.mismatches }, seen };
+})()`;
+const bankTiming = dir => withPage(first(), { ...PHONE, init: WIN_LATE }, page => page.goto(url(dir)).then(() => page.evaluate(BANK_TIMING, 60000)));
+
+test(`${first()}：荷官翻牌、爆牌時籌碼還是押注後的數字，結算動畫演完才加上贏的`, async () => {
+  const r = await bankTiming(APP), why = JSON.stringify(r.value);
+  assert.strictEqual(r.value.reveal && r.value.reveal.bank, '900', why);
+  assert.strictEqual(r.value.bust && r.value.bust.bank, '900', why);
+  assert.deepStrictEqual(r.value.end, { bank: '1,100', mismatches: [] }, why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+// 翻牌那一句講出來時標籤還沒更新，所以壞掉的樣子是在荷官爆牌那一句就已經是結算後的數字
+test('陽性對照：籌碼數字改回直接讀引擎，要判成荷官還沒結算就已經是結算後的數字', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), "hud.setBank(money.bank.get('me'), money.onTable);",
+    "hud.setBank(game.state().seats.find(s => s.id === 'me').bankroll, money.onTable);");
+  try {
+    const r = await bankTiming(tmp);
+    assert.strictEqual(r.value.bust.bank, '1,100', JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -50,11 +50,17 @@
     material.dispose();
   }
 
-  // 畫面正中央的大字（Blackjack、爆牌…），播完自己收掉
-  async function banner(text, ms = 1400) {
+  // 畫面正中央的大字（Blackjack、爆牌…），播完自己收掉。avoid 是不能蓋住的範圍（荷官的臉）：
+  // 直式手機荷官放大 2.2 倍，臉正好落在 38% 那一帶，壓到就整條移到臉的下方
+  async function banner(text, ms = 1400, avoid = null) {
     const el = document.getElementById('banner');
     el.textContent = text;
+    el.style.top = '';
     el.hidden = false;
+    if (avoid) {
+      const h = el.offsetHeight, mid = el.offsetTop;
+      if (mid - h / 2 < avoid.bottom && mid + h / 2 > avoid.top) el.style.top = `${avoid.bottom + 8 + h / 2}px`;
+    }
     el.classList.remove('show');
     void el.offsetWidth;   // 重新觸發 CSS 動畫
     el.classList.add('show');
