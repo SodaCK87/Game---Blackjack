@@ -117,6 +117,58 @@ html, body {
   100% { opacity: 0; }
 }
 
+/* 角落的版本號：回報問題時要說得出是哪一版 */
+#ver {
+  position: fixed;
+  top: 6px;
+  right: 8px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(33, 44, 49, 0.75);
+  color: #b8c7cb;
+  font: 11px var(--font);
+  pointer-events: none;
+}
+
+#ver:empty {
+  display: none;
+}
+
+/* 載不起來時的說明：操作列一起藏掉，免得同事以為按了會動 */
+#fatal {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 32px));
+  padding: 18px 20px;
+  border: 2px solid var(--teal);
+  border-radius: 14px;
+  background: var(--cream);
+  color: var(--bg);
+  font: 16px/1.5 var(--font);
+}
+
+#fatal[hidden] {
+  display: none;
+}
+
+#fatal p {
+  margin: 0 0 8px;
+}
+
+#fatal small {
+  display: block;
+  color: #4e5c64;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+body[data-fatal] #hud {
+  display: none;
+}
+
 /* 下方操作列：高度固定，畫布才不會在換模式時跳動 */
 #hud {
   position: fixed;

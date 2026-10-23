@@ -374,3 +374,79 @@ test('陽性對照：預填的注改回不取整，剩 15 時按發牌要判成�
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// 盤點 D-04：角落的版本號；BJK-03：載不起來時畫面要說原因，不能只剩暗底與「籌碼 0」
+const { BJK_VER } = require('../app/js/core/version.js');
+const SCREEN = `(() => {
+  const v = document.getElementById('ver').getBoundingClientRect();
+  return { text: document.body.innerText, ver: { left: v.left, right: v.right, top: v.top, bottom: v.bottom },
+           vw: innerWidth, vh: innerHeight, hud: getComputedStyle(document.getElementById('hud')).display };
+})()`;
+// 沒有 WebGL 的電腦（關掉硬體加速、部分遠端桌面）：getContext 拿 webgl 回 null，2D 照常
+const NO_WEBGL = `{ const get = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) { return /webgl/.test(type) ? null : get.call(this, type, ...rest); }; }`;
+// 線上檔名大小寫打錯、或複製資料夾時少了一支，都是某支 view 的 script 載不到
+const DROPPED = path.join('js', 'view', 'table.js');
+function copyWithout(file) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-app-'));
+  fs.cpSync(APP, tmp, { recursive: true });
+  fs.rmSync(path.join(tmp, file));
+  return tmp;
+}
+const screenOf = (browser, vp, dir) => withPage(browser, vp, page => page.goto(url(dir)).then(() => page.evaluate(SCREEN)));
+function assertFatal(m, why) {
+  assert.ok(m.text.includes('載不起來') && m.text.includes(`v${BJK_VER}`), `畫面沒有說載不起來或沒帶版本號：${why}`);
+  assert.strictEqual(m.hud, 'none', `載不起來時操作列還在，同事會以為按了會動：${why}`);
+}
+
+for (const browser of availableBrowsers()) {
+  test(`${browser}：桌機與手機的畫面角落都看得到版本號，正常載入時不出現「載不起來」`, async () => {
+    for (const vp of [DESKTOP, PHONE]) {
+      const r = await screenOf(browser, vp, APP), m = r.value, why = `${vp.size.join('×')}：${JSON.stringify(m.ver)}`;
+      assert.ok(m.text.includes(`v${BJK_VER}`), `畫面上找不到 v${BJK_VER}：${why}`);
+      assert.ok(m.ver.left >= 0 && m.ver.right <= m.vw && m.ver.top >= 0 && m.ver.bottom <= m.vh, `版本號跑出畫面：${why}`);
+      assert.ok(!m.text.includes('載不起來'), `正常載入卻出現載不起來：${why}`);
+      assert.deepStrictEqual(r.console, []);
+    }
+  });
+
+  test(`${browser}：沒有 WebGL 時，畫面說載不起來、帶版本號與原因（BJK-03）`, async () => {
+    const r = await screenOf(browser, { ...DESKTOP, init: NO_WEBGL }, APP);
+    assertFatal(r.value, r.value.text);
+    assert.match(r.value.text, /WebGL/);
+    assert.ok(r.console.some(l => l.includes('載不起來')), `主控台沒記：${JSON.stringify(r.console)}`);
+  });
+
+  test(`${browser}：少一支 view 的檔時，手機畫面說載不起來、帶版本號（BJK-03）`, async () => {
+    const tmp = copyWithout(DROPPED);
+    try {
+      const r = await screenOf(browser, PHONE, tmp);
+      assertFatal(r.value, r.value.text);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('陽性對照：拿掉角落版本號那行，要判成畫面上找不到版本號', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'main.js'), "if (ver) document.getElementById('ver').textContent = `v${ver}`;", '');
+  try {
+    const r = await screenOf(first(), DESKTOP, tmp);
+    assert.ok(!r.value.text.includes(`v${BJK_VER}`), r.value.text);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：拿掉顯示訊息那段，沒有 WebGL 與少一支檔都要判成畫面沒說明', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'main.js'), 'if (failed) showFatal(', 'if (false) showFatal(');
+  try {
+    const noGl = await screenOf(first(), { ...DESKTOP, init: NO_WEBGL }, tmp);
+    assert.throws(() => assertFatal(noGl.value, noGl.value.text), /載不起來/);
+    fs.rmSync(path.join(tmp, DROPPED));
+    const dropped = await screenOf(first(), PHONE, tmp);
+    assert.throws(() => assertFatal(dropped.value, dropped.value.text), /載不起來/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,9 @@
   const status = { three: 'missing', ver: 'missing', render: 'not-run', scene: null, core: 'not-run', dealer: null };
   // 給 tests/ 的探針讀的狀態，畫面上不顯示。荷官貼圖是非同步載入，載完會再寫一次
   const publish = () => { document.body.dataset.bjk = JSON.stringify(status); };
+  // 版本號放畫面角落：同事回報時說得出是哪一版，也分得出瀏覽器是不是還留著快取的舊版
+  const ver = window.BJK && window.BJK.version ? window.BJK.version.BJK_VER : null;
+  if (ver) document.getElementById('ver').textContent = `v${ver}`;
   // 先在瀏覽器裡用 core 跑一局全 AI 牌局，確認四支 core 在 classic script 下載得起來、接得上
   try {
     const g = BJK.game.createGame({
@@ -139,6 +142,21 @@
     status.render = 'fail: ' + e.message;
   }
   publish();
+  // 載不起來時畫面只剩暗底與「籌碼 0」，同事分不出是壞了還是存檔被清掉，所以把原因攤在畫面上
+  const failed = [status.core, status.render].find(s => s !== 'ok');
+  if (failed) showFatal(failed.replace(/^fail: /, ''));
+
+  function showFatal(detail) {
+    console.error('21 點載不起來：' + detail);
+    const line = (tag, text) => { const el = document.createElement(tag); el.textContent = text; return el; };
+    const box = document.getElementById('fatal');
+    box.replaceChildren(
+      line('p', `這台電腦載不起來 21 點（${ver ? 'v' + ver : '版本不明'}）。`),
+      line('p', '先重新整理一次；還是不行，請截下這個畫面，傳給分享網址給你的同事。'),
+      line('small', `原因：${detail}`));
+    box.hidden = false;
+    document.body.dataset.fatal = '1';
+  }
 
   // 沿著視線方向前後移動鏡頭，找出框景的每一點都還在畫面裡的最近距離
   function fitCamera(camera, pts, target, dir) {
