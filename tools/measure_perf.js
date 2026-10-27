@@ -5,7 +5,7 @@
 //
 // 用法：node tools/measure_perf.js [選項]
 //   --samples N   正式取樣次數，預設 5；每段另跑 1 次 warmup 不計
-//   --only a,b    只跑這幾段，預設 live 以外全部：blank,load,round,resize,click,soak,odds,engine,test,mutants,build,shoot,live
+//   --only a,b    只跑這幾段，預設 live 以外全部：blank,load,round,resize,click,soak,odds,engine,test,mutants,build,shoot,fx,oddsplit,live
 //   --live        加跑 live（線上網址開啟、tools/check_live.js、GitHub Actions 發布耗時；要連網）
 //   --browser B   edge／chrome／all，預設第一個找得到的（順序同 tests/browser_util.js）
 //   --tmp DIR     暫存根目錄，預設 %TEMP%\bjk-perf-<pid>；跑完刪掉，加 --keep 保留（原始取樣 raw.json 在裡面）
@@ -19,6 +19,7 @@ const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers } = require('../tests/browser_util');
+const { deal } = require('../tests/rig_util');
 
 const REPO = path.join(__dirname, '..');
 const APP = path.join(REPO, 'app');
@@ -42,7 +43,8 @@ const flag = name => argv.includes(name);
 const SMOKE = flag('--smoke');
 const SAMPLES = SMOKE ? 1 : Number(opt('--samples') || 5);
 const WARMUP = SMOKE ? 0 : 1;
-const SEGMENTS = ['blank', 'load', 'round', 'resize', 'click', 'soak', 'odds', 'engine', 'test', 'mutants', 'build', 'shoot', 'live'];
+// fx、oddsplit 是 2026-10-27 第 2 輪加的段，排在既有段之後跑：既有段開跑時的機器狀態才跟第 1 輪一樣
+const SEGMENTS = ['blank', 'load', 'round', 'resize', 'click', 'soak', 'odds', 'engine', 'test', 'mutants', 'build', 'shoot', 'fx', 'oddsplit', 'live'];
 const ONLY = opt('--only') ? opt('--only').split(',') : SEGMENTS.filter(s => s !== 'live');
 if (flag('--live') && !ONLY.includes('live')) ONLY.push('live');
 for (const s of ONLY) if (!SEGMENTS.includes(s)) throw new Error(`沒有這一段：${s}（可用：${SEGMENTS.join(',')}）`);
@@ -719,6 +721,8 @@ async function segSoak() {
 async function segOdds() {
   const { forHand } = require('../app/js/core/odds.js');
   const { value } = require('../app/js/core/hand.js');
+  // v0.11.0 起 forHand 不給 rules 就擲錯、canDouble 改成 legal：只換成新的參數寫法（預設規則、可加倍），540 種與計時不變
+  const { DEFAULTS } = require('../app/js/core/game.js');
   const c = (rank, suit) => ({ rank, suit });
   const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   const cases = [];
@@ -730,7 +734,7 @@ async function segOdds() {
   const e = entry(`勝率計算 odds.forHand（node）`, `${cases.length} 種（兩張牌組合×10 種明牌）、6 副牌、可加倍`, '同事每輪到他一次就算一次；瀏覽器裡那一次的耗時在「按發牌→輪到你」的分段裡');
   await repeat('勝率', async keep => {
     const t0 = now();
-    for (const k of cases) forHand({ hand: k.hand, up: k.up, seen: [...k.hand, k.up], canDouble: true });
+    for (const k of cases) forHand({ hand: k.hand, up: k.up, seen: [...k.hand, k.up], legal: ['hit', 'stand', 'double'], rules: DEFAULTS });
     const ms = now() - t0;
     if (keep) addSample(e, ms, { '◆ 每次 forHand': ms / cases.length });
   });
@@ -804,7 +808,11 @@ async function segTest() {
 
 // npm run mutants：一行一個破壞，用印出那一行的時間切分段
 async function segMutants() {
-  const e = entry('npm run mutants（node tests/mutants.js）', '15 個破壞、每個複製 app\\＋tests\\ 再跑一支測試檔', '比 npm run 少了 npm 自己的啟動');
+  // 破壞數照 tests/mutants.js 的表現數（第 1 輪寫死 15，v0.11.0 起 60）；v0.11.0 起開頭先在沒破壞的複本上跑一次基準，
+  // 那一行另記一段，不然基準的時間會全算進第一個破壞。其餘各列的切法照第 1 輪
+  const src = fs.readFileSync(path.join(REPO, 'tests', 'mutants.js'), 'utf8'), from = src.indexOf('const MUTANTS = [');
+  const mutantCount = (src.slice(from, src.indexOf('\n];', from)).match(/^\s*\[['"]/gm) || []).length;
+  const e = entry('npm run mutants（node tests/mutants.js）', `${mutantCount} 個破壞、每個複製 app\\＋tests\\ 再跑一支測試檔`, '比 npm run 少了 npm 自己的啟動');
   await repeat('mutants', async keep => {
     const r = await timedRun(process.execPath, ['tests/mutants.js']);
     if (r.code !== 0) hookProblems.push(`mutants 結束碼 ${r.code}：${r.lines.slice(-1).map(x => x[1]).join('')}`);
@@ -812,6 +820,7 @@ async function segMutants() {
     const segs = {};
     let prev = 0;
     for (const [t, line] of r.lines) {
+      if (/^基準：/.test(line)) { segs['基準（沒破壞的複本先跑一次）'] = t - prev; prev = t; continue; }
       const m = line.match(/^(?:紅（抓到了）|綠（沒抓到！）|✖) (.+?)(?: →|：|$)/);
       if (!m) continue;
       segs[m[1]] = t - prev;
@@ -850,6 +859,220 @@ async function segShoot() {
       addSample(e, r.ms, segs);
     });
   }
+}
+
+// ---- 第 2 輪（2026-10-27）加的段：大特效（v0.12.0）與分牌（v0.10.0）----
+// 疊牌：機制照 tests/rig_util.js 的 rigInit（攔下 core 掛 BJK.game 的那一刻，只替座位裡有「你」的牌局換牌靴，產品檔不改），
+// 差在牌堆放在 window.__perfRig、每一局開始前重新填：同一頁就能連打好幾種局面。疊的牌用完就接一般的牌靴（種子凍結，也是固定的）
+const RIG = `(() => {
+  if (window.__perfRig) return;
+  const queue = window.__perfRig = [];
+  const B = window.BJK = window.BJK || {};
+  let real;
+  Object.defineProperty(B, 'game', {
+    configurable: true, enumerable: true,
+    get() { return real; },
+    set(g) {
+      const create = g.createGame;
+      real = Object.assign({}, g, {
+        createGame(o) {
+          if (!o.seats.some(s => s.id === 'me')) return create(o);
+          const shoe = B.shoe.createShoe({ decks: 6, penetration: 0.75, rng: o.rng });
+          return create(Object.assign({}, o, { shoe: {
+            size: shoe.size,
+            get remaining() { return shoe.remaining + queue.length; },
+            get dealt() { return shoe.dealt; },
+            needsShuffle: () => !queue.length && shoe.needsShuffle(),
+            shuffle: () => { if (!queue.length) shoe.shuffle(); },
+            draw: () => (queue.length ? queue.shift() : shoe.draw()),
+            discard: list => shoe.discard(list),
+            recycle: () => shoe.recycle(),
+          } }));
+        },
+      });
+    },
+  });
+})();`;
+// 大特效的埋點：包 V.fx.showcase／doubleDown，記呼叫（t0）、同步部分做完（t1）、播完收乾淨（t2）；
+// 播的期間記每一格 requestAnimationFrame 的時間（只在有特效時跑，平常不多插一個每格的回呼）。
+// 開始與結束各叫一次 __perfNotify（CDP binding），node 收到就取一次 TaskDuration，相減＝特效期間主緒忙了多久
+const FXHOOK = `(() => {
+  const P = window.__perf;
+  if (!P || P.fx) return;
+  const now = () => performance.now();
+  P.fx = []; P.frameLog = [];
+  let live = 0, ticking = false;
+  const tick = t => { P.frameLog.push(t); if (live > 0) requestAnimationFrame(tick); else ticking = false; };
+  const notify = msg => { try { window.__perfNotify(msg); } catch (e) { P.errors.push('__perfNotify：' + e.message); } };
+  document.addEventListener('load', e => {
+    const el = e.target;
+    if (!el || el.tagName !== 'SCRIPT' || el.getAttribute('src') !== 'js/view/showcase.js') return;
+    const F = BJK.view.fx;
+    for (const name of ['showcase', 'doubleDown']) {
+      const fn = F[name];
+      if (typeof fn !== 'function') { P.errors.push('fx.' + name + ' 不存在'); continue; }
+      F[name] = function (arg) {
+        const rec = { kind: name === 'doubleDown' ? 'double' : arg, t0: now() };
+        const i = P.fx.push(rec) - 1;
+        const p = fn.apply(this, arguments);
+        rec.t1 = now();
+        live++;
+        if (!ticking) { ticking = true; requestAnimationFrame(tick); }
+        notify('start:' + i);
+        const done = () => { rec.t2 = now(); live--; notify('end:' + i); };
+        return p.then(v => { done(); return v; }, err => { done(); rec.err = err.message; throw err; });
+      };
+    }
+  }, true);
+})();`;
+const FX_DESIGN_MS = { player: 2000, dealer: 2000, double: 2400 };   // 同 app/js/view/showcase.js 的 SHOW_MS、DOUBLE_MS
+const FX_NAMES = { player: '你拿 Blackjack', dealer: '荷官翻出 Blackjack', double: '你加倍' };
+const BTN_NAMES = { standBtn: '停牌', doubleBtn: '加倍', splitBtn: '分牌' };
+
+// 同一頁照這個順序打六局（每局下注 10、正常速度）。小虎、阿德、阿美都拿 19 點停牌；荷官明牌 6、底牌 10，16 點補一張 2 停在 18。
+// 你拿 Blackjack 打兩次：第一次是開頁後第一段大特效（含籌碼貼圖第一次轉成圖檔），第二次是同一頁熱的
+const FX_ROUNDS = [
+  { key: 'plain', name: '你 19 點停牌、沒有大特效', rig: [...deal('10', '9'), '2'], press: ['standBtn'], fx: [], modes: ['act', 'bet'] },
+  { key: 'player1', name: '你拿 Blackjack（開頁後第一段大特效）', rig: [...deal('A', 'K'), '2'], press: [], fx: ['player'], modes: ['bet'] },
+  { key: 'dealer', name: '你 19 點停牌、荷官最後翻出 Blackjack', rig: ['10', '10', '10', '10', 'A', '9', '9', '9', '9', 'K'], press: ['standBtn'], fx: ['dealer'], modes: ['act', 'bet'] },
+  { key: 'double', name: '你 6＋5 加倍、補到 21', rig: [...deal('6', '5'), '10', '2'], press: ['doubleBtn'], fx: ['double'], modes: ['act', 'bet'] },
+  { key: 'player2', name: '你拿 Blackjack（同一頁第二次）', rig: [...deal('A', 'K'), '2'], press: [], fx: ['player'], modes: ['bet'] },
+  { key: 'split', name: '你 8＋8 分牌、兩手各停牌（11 點、17 點）', rig: [...deal('8', '8'), '3', '9', '2'], press: ['splitBtn', 'standBtn', 'standBtn'], fx: [], modes: ['act', 'act', 'act', 'bet'] },
+];
+// 一局：清掉、押 10、按發牌，照 press 依序按（每次等到輪到你或回到下注），記每一步的按下、下一格畫面、到下一個模式的時間
+const FX_DRIVE = press => `(async () => {
+  const P = __perf, $ = id => document.getElementById(id);
+  const frame = () => new Promise(r => requestAnimationFrame(() => r(performance.now())));
+  $('clearBet').click(); document.querySelector('[data-chip="10"]').click();
+  const steps = [], fx0 = P.fx.length, splits0 = BJK.view.stage.director.splits;
+  let from = P.modes.length, t0 = performance.now();
+  $('dealBtn').click();
+  let tFrame = await frame(), m = await P.waitMode(['act', 'bet', 'broke'], from);
+  steps.push({ btn: 'dealBtn', t0, tFrame, t1: m.t, mode: m.mode });
+  for (const btn of ${JSON.stringify(press)}) {
+    if (m.mode !== 'act') break;
+    if ($(btn).hidden || $(btn).disabled) { steps.push({ btn, skipped: true }); break; }
+    from = P.modes.length; t0 = performance.now();
+    $(btn).click();
+    tFrame = await frame(); m = await P.waitMode(['act', 'bet', 'broke'], from);
+    steps.push({ btn, t0, tFrame, t1: m.t, mode: m.mode });
+  }
+  return { steps, fx: P.fx.slice(fx0), splits: BJK.view.stage.director.splits - splits0 };
+})()`;
+
+async function segFx() {
+  for (const browser of BROWSERS) {
+    for (const [vpName, vp] of Object.entries(VIEWPORTS)) {
+      const roundE = {}, fxE = {};
+      for (const R of FX_ROUNDS) {
+        roundE[R.key] = entry(`一局（疊牌）：${R.name}｜${browser}・${vpName}`, `下注 10、正常速度、${vp.size.join('×')}；同一頁連打六局的第 ${FX_ROUNDS.indexOf(R) + 1} 局`,
+          '從按發牌到回到下注；分段照你按的每一顆鈕切');
+        if (R.fx.length) fxE[R.key] = entry(`大特效：${R.key === 'player1' ? '你拿 Blackjack（開頁後第一段）' : R.key === 'player2' ? '你拿 Blackjack（同一頁第二次）' : FX_NAMES[R.fx[0]]}｜${browser}・${vpName}`,
+          `設計長度 ${FX_DESIGN_MS[R.fx[0]].toLocaleString()} ms、${vp.size.join('×')}`, '從導演呼叫特效到特效收乾淨（導演 await 的那一段）；TaskDuration 的窗口頭尾各多出幾 ms 的 CDP 來回');
+      }
+      await repeat(`大特效與分牌 ${browser} ${vpName}`, async keep => {
+        await withBrowser(browser, vp, async b => {
+          // 開始與結束的通知一到就取 TaskDuration（getMetrics 排在頁面當下那個 task 之後，所以「開始」那一筆已含同步部分）
+          const marks = {};
+          b.on(msg => {
+            if (msg.method !== 'Runtime.bindingCalled' || msg.params.name !== '__perfNotify') return;
+            const key = msg.params.payload;
+            marks[key] = b.metrics().then(m => m.TaskDuration * 1000, () => NaN);
+          });
+          await b.send('Runtime.addBinding', { name: '__perfNotify' });
+          await b.send('Page.addScriptToEvaluateOnNewDocument', { source: HOOK });
+          await b.send('Page.addScriptToEvaluateOnNewDocument', { source: RIG });
+          await b.send('Page.addScriptToEvaluateOnNewDocument', { source: FXHOOK });
+          await b.goto(APP_URL);
+          if (!(await b.evaluate(READY, 30000))) throw new Error('頁面沒有建出 BJK.view.stage');
+          const runs = [];
+          for (const R of FX_ROUNDS) {
+            await b.evaluate(IDLE, 30000);
+            const cards = R.rig.map((rank, i) => ({ rank, suit: 'SHDC'[i % 4] }));
+            await b.evaluate(`(() => { const q = window.__perfRig; q.length = 0; q.push(...${JSON.stringify(cards)}); return q.length; })()`);
+            const m0 = await b.metrics();
+            const r = await b.evaluate(FX_DRIVE(R.press), 180000);
+            const m1 = await b.metrics();
+            runs.push({ R, r, busy: (m1.TaskDuration - m0.TaskDuration) * 1000 });
+          }
+          await b.evaluate(IDLE, 30000);
+          const P = await b.evaluate(`(() => { const d = ${DUMP}; const P = __perf; return Object.assign(d, { fx: P.fx, frameLog: P.frameLog, mismatches: BJK.view.stage.director.mismatches }); })()`);
+          checkHook(P, `大特效與分牌 ${browser}・${vpName}`);
+          if (P.mismatches.length) hookProblems.push(`大特效與分牌 ${browser}・${vpName}：畫面與引擎不一致 ${P.mismatches.length} 筆（${JSON.stringify(P.mismatches[0]).slice(0, 120)}）`);
+          const fxBusy = {};
+          for (const [k, p] of Object.entries(marks)) fxBusy[k] = await p;
+          for (const { R, r, busy } of runs) {
+            const where = `大特效與分牌 ${browser}・${vpName}「${R.name}」`;
+            const modes = r.steps.map(s => s.mode);
+            if (JSON.stringify(modes) !== JSON.stringify(R.modes)) { hookProblems.push(`${where}：疊的牌沒打出這個局面（輪到的順序 ${modes.join('→')}，應該是 ${R.modes.join('→')}），這一局不記`); continue; }
+            if (JSON.stringify(r.fx.map(x => x.kind)) !== JSON.stringify(R.fx)) { hookProblems.push(`${where}：大特效是 ${r.fx.map(x => x.kind).join('、') || '沒有'}，應該是 ${R.fx.join('、') || '沒有'}，這一局不記`); continue; }
+            if (R.key === 'split' && r.splits !== 1) { hookProblems.push(`${where}：分牌次數 ${r.splits}，應該是 1，這一局不記`); continue; }
+            if (!keep) continue;
+            const t0 = r.steps[0].t0, t1 = r.steps[r.steps.length - 1].t1;
+            const segs = { '◆ 按發牌到下一格畫面（反應）': r.steps[0].tFrame - r.steps[0].t0 };
+            const handNo = { n: 0 };
+            r.steps.forEach((s, i) => {
+              const next = s.mode === 'act' ? (R.key === 'split' && i >= 1 ? `輪到第 ${i} 手` : '輪到你') : '回到下注';
+              const what = i === 0 ? '發牌' : R.key === 'split' && s.btn === 'standBtn' ? `第 ${++handNo.n} 手停牌` : `按${BTN_NAMES[s.btn]}`;
+              if (i > 0) segs[`◆ 按${BTN_NAMES[s.btn]}到下一格畫面（反應，從按下起算）${R.key === 'split' && s.btn === 'standBtn' ? `・第 ${handNo.n} 手` : ''}`] = s.tFrame - s.t0;
+              segs[`${what}→${next}`] = s.t1 - s.t0;
+            });
+            const renders = spansIn(P, 'render', t0, t1), loaf = P.loaf.filter(([s]) => s >= t0 && s <= t1);
+            addSample(roundE[R.key], t1 - t0, segs, {
+              '其中大特效 ms': sum(r.fx.map(x => x.t2 - x.t0)),
+              'render 次數（動／空轉／直接）': `${renders.filter(x => x[2] === 'move').length}／${renders.filter(x => x[2] === 'idle').length}／${renders.filter(x => x[2] === 'direct').length}`,
+              'render 合計 ms': sum(renders.map(x => x[1])),
+              '主緒忙碌 ms（CDP，整局）': busy,
+              '長掉格數（LoAF >50ms）': loaf.length,
+              '最長一格 ms': loaf.length ? Math.max(...loaf.map(x => x[1])) : 0,
+            });
+            for (const k of r.fx) {
+              // 時間一律拿收尾時的那份（一局打完時 t2 一定已經寫好），用 t0 對回同一筆
+              const i = P.fx.findIndex(y => y.t0 === k.t0), x = P.fx[i];
+              if (!x || x.t2 === undefined) { hookProblems.push(`${where}：大特效 ${k.kind} 沒有播完的時間`); continue; }
+              const life = x.t2 - x.t0, busyFx = fxBusy[`end:${i}`] - fxBusy[`start:${i}`];
+              const rIn = spanSum(P, 'render', x.t1, x.t2);
+              const frames = P.frameLog.filter(t => t >= x.t1 && t <= x.t2), gaps = frames.slice(1).map((t, k) => t - frames[k]);
+              const fl = P.loaf.filter(([s, d]) => s + d >= x.t0 && s <= x.t2);
+              addSample(fxE[R.key], life, {
+                '開場同步工作（建元素、量字、排噴出的籌碼；第一次含籌碼貼圖轉成圖檔）': x.t1 - x.t0,
+                'render：特效期間照樣每格重畫被蓋住的 3D 牌桌': rIn,
+                '其他主緒工作（樣式、版面、作畫、GC…；CDP 量）': busyFx - rIn,
+                '主緒閒著（等 CSS 動畫播完）': life - (x.t1 - x.t0) - busyFx,
+              }, {
+                '超出設計長度 ms': life - FX_DESIGN_MS[x.kind],
+                'render 次數': spansIn(P, 'render', x.t1, x.t2).length,
+                '格數': frames.length, '最長格間隔 ms': gaps.length ? Math.max(...gaps) : NaN, '格間隔 >50ms 數': gaps.filter(g => g > 50).length,
+                '長掉格數（LoAF >50ms）': fl.length, '最長一格 ms': fl.length ? Math.max(...fl.map(f => f[1])) : 0,
+              });
+            }
+          }
+        });
+      });
+    }
+  }
+}
+
+// 勝率計算的分牌路徑（node）：對子才會算分牌的期望值（再分算到上限），v0.10.0 起輪到你拿對子時算一次。
+// 不含對子的那 540 種在 segOdds；這段的 legal 照牌局：要、停、分，硬 10／11 點（5＋5）多一個加倍
+async function segOddSplit() {
+  const { forHand } = require('../app/js/core/odds.js');
+  const { value } = require('../app/js/core/hand.js');
+  const { DEFAULTS } = require('../app/js/core/game.js');
+  const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+  const cases = [];
+  for (const r of RANKS) {
+    const hand = [{ rank: r, suit: 'S' }, { rank: r, suit: 'H' }], v = value(hand);
+    const legal = ['hit', 'stand', 'split', ...(!v.soft && DEFAULTS.doubleOn.includes(v.total) ? ['double'] : [])];
+    for (const u of RANKS) cases.push({ hand, up: { rank: u, suit: 'D' }, legal });
+  }
+  const e = entry('勝率計算 odds.forHand，對子含分牌（node）', `${cases.length} 種（10 種對子×10 種明牌）、6 副牌、預設規則`, '同事拿到對子、輪到他時算一次；瀏覽器裡那一次在「一局（疊牌）：你 8＋8 分牌」的發牌→輪到你裡');
+  await repeat('勝率含分牌', async keep => {
+    const t0 = now();
+    for (const k of cases) forHand({ hand: k.hand, up: k.up, seen: [...k.hand, k.up], legal: k.legal, rules: DEFAULTS });
+    const ms = now() - t0;
+    if (keep) addSample(e, ms, { '◆ 每次 forHand': ms / cases.length });
+  });
 }
 
 // 線上：開網址（GitHub Pages）、check_live.js、GitHub Actions 發布耗時（GitHub 記的歷史值）
@@ -925,7 +1148,7 @@ process.on('SIGINT', async () => { await cleanup(); process.exit(130); });
     blank: segBlank,
     load: () => segLoad(APP_URL, '開啟到畫面完整（雙擊 app\\index.html）', `app\\ ${dirSize(APP).bytes.toLocaleString()} bytes`),
     round: segRound, resize: segResize, click: segClick, soak: segSoak, odds: segOdds, engine: segEngine,
-    test: segTest, mutants: segMutants, build: segBuild, shoot: segShoot, live: segLive,
+    test: segTest, mutants: segMutants, build: segBuild, shoot: segShoot, fx: segFx, oddsplit: segOddSplit, live: segLive,
   };
   try {
     for (const s of ONLY) {
