@@ -14,7 +14,7 @@ const { rigInit, deal } = require('./rig_util');
 const ODDS_TURN = MEASURE_TURN.replace(/const rect = el =>[\s\S]*$/, `
   const cards = []; s.scene.traverse(o => { if (o.userData.kind === 'card') cards.push(o); });
   const odds = id => { const b = document.getElementById(id); const sm = b.querySelector('.odds');
-    return { text: sm.textContent, shown: !b.hidden && getComputedStyle(sm).display !== 'none', hidden: b.hidden, disabled: b.disabled, title: b.title,
+    return { text: sm.textContent, shown: !b.hidden && getComputedStyle(sm).display !== 'none' && getComputedStyle(sm).visibility !== 'hidden', hidden: b.hidden, disabled: b.disabled, title: b.title,
              best: b.classList.contains('best'), badge: getComputedStyle(b, '::after').display !== 'none' && getComputedStyle(b, '::after').content === '"建議"' }; };
   const all = () => ({ hit: odds('hitBtn'), stand: odds('standBtn'), double: odds('doubleBtn'), split: odds('splitBtn') });
   const on = all();
@@ -62,6 +62,59 @@ test(`${first()}：輪到你時每個動作標出勝率，只用翻開的牌算�
   assert.deepStrictEqual(m.pref, { odds: false });
   assert.deepStrictEqual(after, { pressed: 'false', text: '勝率提示：關' });
   assert.deepStrictEqual(r.console, []);
+});
+
+// 勝率提示關掉：按鈕跟開著時一樣大，原本的小字藏起來，動作名放大塞滿。開、關各量一次外框；
+// 大字是 .big::before 生出來的，量不到字框，改用 canvas 照它算出來的字型量寬度
+const ODDS_OFF = `(async () => {${PLAY_UTIL}
+  const ctx = document.createElement('canvas').getContext('2d');
+  const read = () => [...document.querySelectorAll('#actBar button')].filter(el => !el.hidden).map(el => {
+    const r = el.getBoundingClientRect(), big = el.querySelector('.big'), b = big.getBoundingClientRect(), pre = getComputedStyle(big, '::before');
+    ctx.font = pre.fontSize + ' ' + pre.fontFamily;
+    return { id: el.id, disabled: el.disabled, w: r.width, h: r.height, cw: el.clientWidth, ch: el.clientHeight,
+             font: parseFloat(getComputedStyle(el).fontSize), color: getComputedStyle(el).color, odds: getComputedStyle(el.querySelector('.odds')).visibility,
+             big: { shown: getComputedStyle(big).display !== 'none', text: pre.content, label: big.dataset.label, w: b.width, h: b.height,
+                    font: parseFloat(pre.fontSize), textW: ctx.measureText(big.dataset.label).width } };
+  });
+  const on = read();
+  $('oddsToggle').click();
+  return { on, off: read() };
+})()`;
+function oddsOffProblems({ on, off }) {
+  const out = [];
+  off.forEach((b, i) => {
+    const a = on[i], big = b.big;
+    if (Math.abs(a.w - b.w) > 0.5 || Math.abs(a.h - b.h) > 0.5) out.push(`${b.id} 關掉後大小變了：${a.w}×${a.h} → ${b.w}×${b.h}`);
+    if (a.big.shown) out.push(`${b.id} 開著時就疊了大字`);
+    if (b.color !== 'rgba(0, 0, 0, 0)' || b.odds !== 'hidden') out.push(`${b.id} 關掉後原本的小字還看得到`);
+    if (!big.shown || big.text !== `"${big.label}"`) out.push(`${b.id} 關掉後沒有大字：${big.text}`);
+    if (Math.abs(big.w - b.cw) > 0.5 || Math.abs(big.h - b.ch) > 0.5) out.push(`${b.id} 的大字層沒蓋滿按鈕內框`);
+    if (big.textW > b.cw || big.font > b.ch) out.push(`${b.id} 的大字 ${big.font}px（寬 ${big.textW}）塞不進 ${b.cw}×${b.ch}`);
+    if (big.font < (b.disabled ? 1 : 1.5) * b.font) out.push(`${b.id} 的大字 ${big.font}px，原本 ${b.font}px`);
+  });
+  return out;
+}
+// 桌機四顆都標勝率（最擠）；手機 10＋7 的加倍反灰、沒有勝率，是最窄的一顆
+const oddsOff = (vp, cards, dir) => withPage(first(), { ...vp, init: rigInit(cards) }, page => page.goto(url(dir)).then(() => page.evaluate(ODDS_OFF, 30000)));
+for (const [name, vp, cards] of [['桌機', DESKTOP, deal('5', '5')], ['手機', PHONE, deal('10', '7')]]) {
+  test(`${first()}：${name}上關掉勝率提示，動作鈕跟開著時一樣大，動作名放大塞滿`, async () => {
+    const r = await oddsOff(vp, cards, APP);
+    assert.strictEqual(r.value.off.length, name === '桌機' ? 4 : 3, JSON.stringify(r.value));
+    assert.deepStrictEqual(oddsOffProblems(r.value), [], JSON.stringify(r.value.off));
+    assert.deepStrictEqual(r.console, []);
+  });
+}
+
+test('陽性對照：關掉時勝率改回不佔位、大字不放大，要判成按鈕縮小、字沒變大', async () => {
+  const tmp = copyWith('style.css', '#hud[data-odds="off"] #actBar .odds {\n  visibility: hidden;', '#hud[data-odds="off"] #actBar .odds {\n  display: none;');
+  fs.writeFileSync(path.join(tmp, 'style.css'), fs.readFileSync(path.join(tmp, 'style.css'), 'utf8').replace('font-size: min(43cqw, 60cqh);', ''));
+  try {
+    const problems = oddsOffProblems((await oddsOff(PHONE, deal('10', '7'), tmp)).value);
+    assert.ok(problems.some(p => /關掉後大小變了/.test(p)), problems.join('｜'));
+    assert.ok(problems.some(p => /hitBtn 的大字 20px，原本 14px/.test(p)), problems.join('｜'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('陽性對照：按鈕沒標建議時，要抓到「標建議的按鈕不對」', async () => {

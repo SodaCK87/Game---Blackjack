@@ -223,7 +223,7 @@ body[data-fatal] #hud {
   visibility: hidden;
 }
 
-/* 勝率提示：動作按鈕下方一行小字；關掉時藏起來 */
+/* 勝率提示：動作按鈕下方一行小字 */
 #hud button .odds {
   display: block;
   margin-top: 1px;
@@ -231,9 +231,43 @@ body[data-fatal] #hud {
   font-size: 12px;
 }
 
-#hud button .odds:empty,
-#hud[data-odds="off"] button .odds {
+#hud button .odds:empty {
   display: none;
+}
+
+/* 勝率提示關掉時按鈕不縮：動作名與勝率照樣排版、只是看不到（勝率關掉也照填），
+   上面疊一層跟按鈕內框一樣大的 .big，字級照它的寬高算，動作名放大塞滿，手機上比較好讀 */
+#actBar button {
+  position: relative;
+}
+
+#actBar .big {
+  display: none;
+}
+
+#hud[data-odds="off"] #actBar button {
+  color: transparent;
+}
+
+#hud[data-odds="off"] #actBar .odds {
+  visibility: hidden;
+}
+
+#hud[data-odds="off"] #actBar .big {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
+  color: #fff;
+}
+
+#hud[data-odds="off"] #actBar .big::before {
+  content: attr(data-label);
+  font-size: 20px;
+  font-size: min(43cqw, 60cqh);
+  line-height: 1;
 }
 
 /* 期望值最好的那顆：金框加右上角「建議」小牌 */
