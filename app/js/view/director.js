@@ -2,7 +2,7 @@
 // 引擎一次就把結果算完，畫面照事件順序慢慢演；每演完一批事件，就核對一次畫面與引擎的狀態對不對得上。
 (function () {
   const V = window.BJK.view;
-  const A = V.anim, FX = V.fx;
+  const A = V.anim, FX = V.fx, S = V.sfx;
   const Y = new THREE.Vector3(0, 1, 0);
   const START = 1000;
 
@@ -74,6 +74,7 @@
   function create({ scene, table: T, dealer, project, render, hud }) {
     // 少了 showcase.js 要在開頁就說，不要等到第一次 Blackjack 才卡住
     if (!FX.showcase || !FX.doubleDown) throw new Error('載入順序錯：showcase.js 要排在 director.js 之前');
+    if (!S) throw new Error('載入順序錯：sfx.js 要排在 director.js 之前');
     const rng = V.rng(Date.now() & 0x7fffffff);
     const saved = loadSave();
     const game = BJK.game.createGame({
@@ -282,11 +283,13 @@
       const under = h.stacks.reduce((a, st) => a + stackHeight(st), 0);
       h.stacks.push(stack);
       await FX.arc(stack, chipPos(id, k, n, slotIdx, under), { ms: 420, lift: 0.8 });
+      S.play('chip');
     }
 
     async function collect(id, k, to) {
       const h = handsOf(id)[k];
       await Promise.all(h.stacks.map(s => FX.arc(s, to, { ms: 450, lift: 0.6 })));
+      if (h.stacks.length) S.play('chip');
       h.stacks.forEach(s => scene.remove(s));
       h.stacks = [];
     }
@@ -316,6 +319,7 @@
     const handlers = {
       async shuffle(e) {
         say('deal', e.midRound ? '牌發完了，把棄牌洗回去。' : '洗牌中…');
+        S.play('shuffle', { dur: 0.8 / A.speed });
         await A.wait(800);
       },
       bet(e) {
@@ -328,6 +332,7 @@
         mesh.rotation.set(0, T.shoe.rotation.y, Math.PI);
         scene.add(mesh);
         dealer.setMood('deal');
+        S.play('deal', { dur: 0.36 / A.speed });
         if (e.to === 'dealer') {
           const k = dealerCards.length;
           dealerCards.push(mesh);
@@ -409,6 +414,7 @@
         ring.visible = false;
         say('deal', '翻開底牌。');
         const hole = dealerCards[1];
+        S.play('flip', { dur: 0.42 / A.speed });
         await FX.arc(hole, hole.position.clone(), { ms: 420, lift: 0.35, rot: { x: 0, y: hole.rotation.y, z: 0 } });
         hole.rotation.z = 0;
         updateLabels();
@@ -458,6 +464,7 @@
       async roundEnd() {
         ring.visible = false;
         const all = [...dealerCards, ...SEATS.flatMap(s => handsOf(s.id).flatMap(h => h.cards))];
+        S.play('collect', { dur: 0.42 / A.speed });
         await Promise.all(all.map(m => FX.arc(m, discardPoint, {
           ms: 420, lift: 0.4, rot: { x: 0, y: T.discard.rotation.y, z: Math.PI },
         })));
@@ -476,17 +483,25 @@
           const group = [];
           while (i < events.length && events[i].type === 'bet') group.push(events[i++]);
           group.forEach(applyMoney);
+          const heard = listen('chip');
           await Promise.all(group.map(e => handlers.bet(e)));
+          if (heard() < group.length) fail(`${group.length} 個座位下注，籌碼聲只有 ${heard()} 次`);
           group.forEach(checkAfter);
         } else {
           const e = events[i++];
           applyMoney(e);
+          const heard = SOUND_OF[e.type] && listen(SOUND_OF[e.type]);
           if (handlers[e.type]) await handlers[e.type](e);
+          if (heard && !heard()) fail(`${e.type} 演完沒有${SOUND_OF[e.type]}的聲音`);
           checkAfter(e);
         }
       }
       verify();
     }
+
+    // 每種事件該出的聲音：演完之後那種聲音要多叫至少一次（關掉音效、還沒點過時照樣叫，只是不出聲）。新增事件種類時這裡也要想一次
+    const SOUND_OF = { shuffle: 'shuffle', deal: 'deal', split: 'chip', double: 'chip', reveal: 'flip', settle: 'chip', roundEnd: 'collect' };
+    const listen = name => { const before = S.requested[name] || 0; return () => (S.requested[name] || 0) - before; };
 
     // ---- 自我核對：畫面要跟事件對得上，事件累積起來要跟引擎對得上 ----
     // shadow 是「照事件演到這裡，桌上每個座位的每一手應該是哪些牌」；每演完一個事件就拿畫面跟它比

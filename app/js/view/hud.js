@@ -1,25 +1,44 @@
-// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍／分牌
+// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍／分牌。左上角的音效開關也在這裡接
 (function () {
   const V = window.BJK.view;
 
-  // 勝率提示開或關，記在瀏覽器裡（跟籌碼存檔分開放：清掉偏好不該動到籌碼）
+  // 勝率提示與音效開或關，記在瀏覽器裡（跟籌碼存檔分開放：清掉偏好不該動到籌碼）。
+  // 兩個開關存在同一筆，寫一個時要保留另一個；沒存過的欄位當成開
   const PREFS_KEY = 'bjk.prefs.v1';
-  function loadOddsPref() {
+  function loadPrefs() {
     try {
       const p = JSON.parse(localStorage.getItem(PREFS_KEY));
-      return p && typeof p.odds === 'boolean' ? p.odds : true;
+      return p && typeof p === 'object' && !Array.isArray(p) ? p : {};
     } catch (e) {
-      return true;
+      return {};
     }
+  }
+  const prefOn = name => loadPrefs()[name] !== false;
+  function savePref(name, on) {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(loadPrefs(), { [name]: on }))); } catch (e) { /* 存不了就只在這一場有效 */ }
   }
   const pct = x => `${Math.round(x * 100)}%`;
 
   function create({ minBet, maxBet, step, onDeal, onReset }) {
+    if (!V.sfx) throw new Error('載入順序錯：sfx.js 要排在 hud.js 之前');
     const $ = id => document.getElementById(id);
     const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
     $('resetBtn').addEventListener('click', () => onReset());
 
-    let oddsOn = loadOddsPref();
+    let soundOn = prefOn('sound');
+    function applySound() {
+      V.sfx.on = soundOn;
+      $('soundToggle').setAttribute('aria-pressed', String(soundOn));
+      $('soundToggle').title = `音效：${soundOn ? '開' : '關'}`;
+    }
+    $('soundToggle').addEventListener('click', () => {
+      soundOn = !soundOn;
+      savePref('sound', soundOn);
+      applySound();
+    });
+    applySound();
+
+    let oddsOn = prefOn('odds');
     function applyOddsToggle() {
       $('oddsToggle').setAttribute('aria-pressed', String(oddsOn));
       $('oddsToggle').textContent = `勝率提示：${oddsOn ? '開' : '關'}`;
@@ -27,7 +46,7 @@
     }
     $('oddsToggle').addEventListener('click', () => {
       oddsOn = !oddsOn;
-      try { localStorage.setItem(PREFS_KEY, JSON.stringify({ odds: oddsOn })); } catch (e) { /* 存不了就只在這一場有效 */ }
+      savePref('odds', oddsOn);
       applyOddsToggle();
     });
     applyOddsToggle();
@@ -45,7 +64,7 @@
     }
 
     for (const b of betBar.querySelectorAll('[data-chip]')) {
-      b.addEventListener('click', () => { bet += Number(b.dataset.chip); refresh(); });
+      b.addEventListener('click', () => { bet += Number(b.dataset.chip); V.sfx.play('chip'); refresh(); });
     }
     $('clearBet').addEventListener('click', () => { bet = 0; refresh(); });
     $('dealBtn').addEventListener('click', () => {

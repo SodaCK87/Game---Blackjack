@@ -192,6 +192,12 @@ async function withPage(browser, { size = [1280, 720], mobile = false, init = ''
         if (r.exceptionDetails) throw new Error(`頁面內執行失敗：${r.exceptionDetails.text}`);
         return r.result.value;
       },
+      // 真的點一下（CDP Input）：瀏覽器把它算成使用者操作，自動播放政策才放行音效；頁面裡的 el.click() 不算
+      async click(x, y) {
+        for (const type of ['mousePressed', 'mouseReleased']) {
+          await client.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+        }
+      },
       async screenshot(file) {
         const r = await client.send('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(file, Buffer.from(r.data, 'base64'));

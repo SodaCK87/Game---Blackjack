@@ -13,6 +13,7 @@
 <div id="overlay"></div>
 <div id="bubble" class="bubble" hidden></div>
 <div id="ver" title="版本號：回報問題時一起告訴對方"></div>
+<button id="soundToggle" aria-label="音效" aria-pressed="true" title="音效：開"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk" d="M3 9h4l5-4v14l-5-4H3z"/><path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="mute" d="M16 9l6 6M22 9l-6 6"/></svg></button>
 <div id="fatal" role="alert" hidden></div>
 <div id="hud" data-mode="bet">
   <div class="hud-info"><span>籌碼 <b id="bank">0</b></span><span>下注 <b id="bet">0</b></span><button id="oddsToggle" class="toggle" aria-pressed="true">勝率提示：開</button></div>
@@ -21,6 +22,8 @@
     <button data-chip="50">+50</button>
     <button data-chip="100">+100</button>
     <button data-chip="500">+500</button>
+    <button data-chip="1000">+1000</button>
+    <button data-chip="2000">+2000</button>
     <button id="clearBet" class="ghost">清除</button>
     <button id="dealBtn" class="primary">發牌</button>
   </div>
@@ -49,6 +52,7 @@
 <script src="js/view/room.js"></script>
 <script src="js/view/dealer.js"></script>
 <script src="js/view/anim.js"></script>
+<script src="js/view/sfx.js"></script>
 <script src="js/view/effects.js"></script>
 <script src="js/view/showcase.js"></script>
 <script src="js/view/hud.js"></script>

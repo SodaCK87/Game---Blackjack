@@ -113,6 +113,46 @@ html, body {
   display: none;
 }
 
+/* 音效開關：左上角一顆圓鈕，喇叭帶聲波是開、打叉是關 */
+#soundToggle {
+  position: fixed;
+  top: 6px;
+  left: 8px;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  border: 2px solid #4e5c64;
+  border-radius: 50%;
+  background: rgba(33, 44, 49, 0.75);
+  color: #b8c7cb;
+  cursor: pointer;
+}
+
+#soundToggle[aria-pressed="true"] {
+  border-color: var(--teal);
+  color: var(--cream);
+}
+
+#soundToggle svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#soundToggle .spk {
+  fill: currentColor;
+}
+
+#soundToggle[aria-pressed="true"] .mute,
+#soundToggle[aria-pressed="false"] .wave {
+  display: none;
+}
+
 /* 載不起來時的說明：操作列一起藏掉，免得同事以為按了會動 */
 #fatal {
   position: fixed;
@@ -144,7 +184,8 @@ html, body {
   overflow-wrap: anywhere;
 }
 
-body[data-fatal] #hud {
+body[data-fatal] #hud,
+body[data-fatal] #soundToggle {
   display: none;
 }
 
@@ -188,6 +229,10 @@ body[data-fatal] #hud {
 
 .hud-bar[hidden] {
   display: none;
+}
+
+#betBar {
+  gap: 12px;
 }
 
 #hud button {
@@ -316,7 +361,38 @@ body[data-fatal] #hud {
   align-items: center;
 }
 
-/* 手機：下注列六顆按鈕要擠在一排，否則換行後會超出固定高度的操作列 */
+/* 窄螢幕：下注列八顆一排要 590px（Edge 實測），改成兩排：籌碼六顆等寬一排，清除與發牌一排、發牌佔三分之二。
+   操作列跟著加高；高度在各模式都一樣，畫布才不會在換模式時跳動。界線不能再高：iPhone SE 橫放是 667 寬，
+   兩排的操作列會把牌桌壓到剩 220px 高 */
+@media (max-width: 660px) {
+  :root {
+    --hud-h: 152px;
+  }
+
+  #betBar:not([hidden]) {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    max-width: 440px;
+  }
+
+  #hud #betBar button {
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  #clearBet {
+    grid-column: span 2;
+  }
+
+  #dealBtn {
+    grid-column: span 4;
+  }
+}
+
+/* 手機：動作列最多四顆要排在一排，否則換行後會超出固定高度的操作列 */
 @media (max-width: 480px) {
   .hud-bar {
     gap: 4px;
