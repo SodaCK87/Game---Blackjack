@@ -305,21 +305,26 @@
       topUps += amount;
     }
 
-    // totalBet：這個座位押在桌上的總額（各手加起來）
+    // totalBet：這個座位押在桌上的總額（各手加起來）。
+    // 回傳的一律是拷貝，誰改了它都碰不到牌局。逐層拷貝，不走 JSON 來回：那一步佔全 AI 長跑的九成三（P-11）
+    const copyCard = c => c && { ...c };
     function state() {
       const visible = dealer.holeHidden ? dealer.cards.slice(0, 1) : dealer.cards;
-      return JSON.parse(JSON.stringify({
+      return {
         phase, turn, turnHand: turn ? seat(turn).current : null, house, topUps,
         dealer: {
-          cards: dealer.holeHidden ? [dealer.cards[0], null] : dealer.cards,
+          cards: (dealer.holeHidden ? [dealer.cards[0], null] : dealer.cards).map(copyCard),
           total: visible.length ? hand.value(visible).total : 0,
         },
         seats: seats.map(s => ({
           id: s.id, name: s.name, personality: s.personality, bankroll: s.bankroll,
           totalBet: s.hands.reduce((a, h) => a + h.bet, 0),
-          hands: s.hands.map(h => Object.assign({}, h, { total: h.cards.length ? hand.value(h.cards).total : 0 })),
+          hands: s.hands.map(h => Object.assign({}, h, {
+            cards: h.cards.map(copyCard), result: h.result && { ...h.result },
+            total: h.cards.length ? hand.value(h.cards).total : 0,
+          })),
         })),
-      }));
+      };
     }
 
     return { startRound, legal, act, aiChoice, finishRound, topUp, state, rules: o };

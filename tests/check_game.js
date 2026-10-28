@@ -504,6 +504,22 @@ test('牌局進行中荷官的底牌對外是蓋著的', () => {
   assert.strictEqual(g.state().dealer.total, 9);
 });
 
+// 畫面與 AI 都拿 state() 來讀；回傳的若是引擎裡的同一個物件，誰改了它就等於偷改牌局
+test('state() 回傳的是拷貝：改它的牌、手、座位，引擎裡的照舊', () => {
+  const g = oneSeat(['10', '9', '8', '7']);
+  g.startRound({ p: 100 });
+  const before = JSON.stringify(g.state());
+  const st = g.state();
+  st.dealer.cards[0].rank = 'A';
+  st.dealer.cards.push({ rank: 'K', suit: 'S' });
+  st.seats[0].hands[0].cards[0].rank = 'A';
+  st.seats[0].hands[0].cards.push({ rank: 'K', suit: 'S' });
+  st.seats[0].hands[0].bet = 1;
+  st.seats[0].hands.push({});
+  st.seats[0].bankroll = 0;
+  assert.strictEqual(JSON.stringify(g.state()), before);
+});
+
 test('照座位順序輪流，沒輪到的人不能動', () => {
   const g = createGame({
     rng: noRng,

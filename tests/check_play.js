@@ -45,7 +45,7 @@ async function autoplay(browser, appDir, stuckMs = 40000) {
       const timeout = new Promise(res => setTimeout(() => res({ stuck: true, rounds: d.rounds, splits: d.splits, mismatches: d.mismatches, fx: fxReport() }), ${stuckMs}));
       const run = d.autoplay(${ROUNDS}).then(x => ({ stuck: false, ...x, log, fx: fxReport() }));
       return Promise.race([run, timeout]);
-    })()`, 60000);
+    })()`, stuckMs + 20000);
   });
   return { ...r.value, console: r.console, leftover: r.leftover };
 }
@@ -149,7 +149,8 @@ test('陽性對照：規則改回荷官先偷看，第 2 局要判成沒輪到�
 async function fxCaught(file, from, to, pattern) {
   const tmp = brokenCopy(file, from, to);
   try {
-    const r = await autoplay(first(), tmp);
+    // 破壞過的特效照真實時間等，每段多 2 秒；全套平行跑時 8 局會超過預設的 40 秒（2026-10-28 撞過），所以放寬到 2 分鐘
+    const r = await autoplay(first(), tmp, 120000);
     assert.strictEqual(r.stuck, false, '破壞後卡住了，量不到大特效');
     assert.ok(fxProblems(r.fx).some(p => pattern.test(p)), `沒抓到：${JSON.stringify(fxProblems(r.fx).slice(0, 3))}`);
   } finally {

@@ -72,6 +72,8 @@ const MUTANTS = [
   ['分牌勝率照一般打法算（splitOneCard: true 沒照只補一張）', 'app/js/core/odds.js', "const oneCard = rules.splitOneCard || first.rank === 'A';", "const oneCard = first.rank === 'A';", 'tests/check_odds.js'],
   ['分 A 的勝率照一般打法算（A 沒限一張）', 'app/js/core/odds.js', "const oneCard = rules.splitOneCard || first.rank === 'A';", 'const oneCard = rules.splitOneCard;', 'tests/check_odds.js'],
   ['分後 Blackjack 在勝率裡只賠 1 倍', 'app/js/core/odds.js', 'ev: 1.5 * (1 - bj), bj: true', 'ev: 1 - bj, bj: true', 'tests/check_odds.js'],
+  // ---- 2026-10-28 state() 改成逐層拷貝（P-11）----
+  ['state() 給出引擎裡的牌物件（沒拷貝，改回傳值就改到牌局）', 'app/js/core/game.js', 'const copyCard = c => c && { ...c };', 'const copyCard = c => c;', 'tests/check_game.js'],
 ];
 
 // 失敗清單裡「有名字的」那幾條：載入就擲錯時 node 記的是以檔名命名的一條（tests\check_x.js），不算

@@ -1,8 +1,9 @@
 // 守三段大特效（app/js/view/showcase.js）：你拿 Blackjack、荷官翻出 Blackjack、你按「加倍」時各播一次，播完收乾淨、
 // 畫面跟事件對得上、主控台乾淨；加倍的特效播完才把加倍那疊籌碼推上桌；少了 showcase.js 時開頁就說載不起來；
-// 大標與副標看得到的字對在同一條中線上；加倍那片籌碼一路躺著（不會出現直立的橢圓）；噴出的籌碼翻面時面額字不左右相反。
-// 大字不蓋住荷官的臉（BJK-04）與同一局只播一次（BJK-05）在 check_ui.js；40 倍速連打時不變慢、不疊在一起在 check_play.js。
-// 驗不到：好不好看、節奏對不對（照 shots 的格放截圖看），真手機上的效能。
+// 大標與副標看得到的字對在同一條中線上；加倍那片籌碼一路躺著（不會出現直立的橢圓）；噴出的籌碼翻面時面額字不左右相反；
+// 開頁後有看不到的預演；播的期間不重畫被蓋住的 3D 牌桌。
+// 大字不蓋住荷官的臉（BJK-04）與同一局只播一次（BJK-05）在 check_ui_text.js；40 倍速連打時不變慢、不疊在一起在 check_play.js。
+// 驗不到：好不好看、節奏對不對（照 shots 的格放截圖看），真手機上的效能；預演有沒有真的消掉頓一下（tools/measure_perf.js --only fx）。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -167,7 +168,7 @@ const COIN = `(async () => {
   const samples = [];
   for (let i = 29; i <= 84; i++) {
     await seek(i / 100, 24000);
-    const b = document.querySelector('.bigfx-coin img').getBoundingClientRect();
+    const b = document.querySelector('.bigfx .bigfx-coin img').getBoundingClientRect();
     samples.push({ f: i / 100, w: +b.width.toFixed(1), h: +b.height.toFixed(1) });
   }
   return samples;
@@ -207,7 +208,7 @@ const MIRROR = `(async () => {
   let mirrored = 0, seen = 0, minSquash = Infinity;
   for (let i = 16; i <= 99; i++) {
     await seek(i / 100, 40000);
-    for (const c of document.querySelectorAll('.bigfx-chip')) {
+    for (const c of document.querySelectorAll('.bigfx .bigfx-chip')) {
       const cs = getComputedStyle(c);
       if (+cs.opacity < 0.05 || cs.transform === 'none') continue;
       const m = new DOMMatrix(cs.transform);
@@ -234,4 +235,69 @@ test('陽性對照：翻面改回直接用 cos（會變負的），要判成字�
   const r = await mirror(tmp);
   t.diagnostic(`破壞後量了 ${r.value.seen} 片次，鏡像 ${r.value.mirrored}`);
   assert.ok(r.value.mirrored > 0, JSON.stringify(r.value));
+}));
+
+// ---- 2026-10-28：開頁後的預演（P-14）、大特效期間不重畫被蓋住的牌桌（P-13） ----
+// 預演是開頁閒下來時用幾乎透明的外框把兩段特效各快播一次，第一次作畫要建的東西先建好。這裡守「有預演、看不到、
+// 牌桌沒震、播完收掉」；真的消掉長掉格要在沒別的事在跑的機器上量（tools/measure_perf.js --only fx）：
+// 全套平行跑時每一格都可能被拖長，放進 npm test 只會隨機紅
+const WARM_INIT = `window.__warm = [];
+  new MutationObserver(list => { for (const m of list) {
+    for (const n of m.addedNodes) if (n.classList && n.classList.contains('bigfx-warm'))
+      __warm.push({ cls: n.className, opacity: +getComputedStyle(n).opacity, body: document.body.className, t0: performance.now() });
+    for (const n of m.removedNodes) if (n.classList && n.classList.contains('bigfx-warm')) { const x = __warm.find(x => x.t1 === undefined); if (x) x.t1 = performance.now(); }
+  } }).observe(document, { childList: true, subtree: true });`;
+const WARM = `(async () => {
+  await BJK.view.stage.dealer.ready;
+  for (let t = 0; t < 8000 && !(__warm.length >= 2 && __warm.every(x => x.t1 !== undefined)); t += 50) await new Promise(r => setTimeout(r, 50));
+  return { warm: __warm.map(x => ({ cls: x.cls, opacity: x.opacity, shook: /bigfx-(shake|clack)/.test(x.body), ms: x.t1 === undefined ? null : Math.round(x.t1 - x.t0) })),
+           left: document.querySelectorAll('.bigfx-warm, .bigfx').length };
+})()`;
+const warm = dir => withPage(first(), { ...DESKTOP, init: WARM_INIT }, page => page.goto(url(dir)).then(() => page.evaluate(WARM, 30000)));
+
+test(`${first()}：開頁後把你拿 Blackjack 與加倍兩段各預演一次：看不到（透明度不到 1%）、牌桌不震、播完收掉`, async () => {
+  const r = await warm(APP), why = JSON.stringify(r.value);
+  assert.deepStrictEqual(r.value.warm.map(x => x.cls), ['bigfx-warm gold', 'bigfx-warm teal'], why);
+  assert.ok(r.value.warm.every(x => x.opacity <= 0.01 && !x.shook && x.ms !== null && x.ms < 2000), why);
+  assert.strictEqual(r.value.left, 0, why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：開頁後沒叫預演，要判成沒預演；預演沒設透明，要判成看得到', async () => {
+  await withCopy([[path.join('js', 'view', 'main.js'), 'idle(() => V.fx.rehearse());', '']], async tmp => {
+    assert.deepStrictEqual((await warm(tmp)).value.warm, []);
+  });
+  await withCopy([[SHOWCASE, '.bigfx-warm { opacity: 0.004 !important; }', '']], async tmp => {
+    const r = await warm(tmp);
+    assert.ok(r.value.warm.length === 2 && r.value.warm.every(x => x.opacity > 0.5), JSON.stringify(r.value));
+  });
+});
+
+// 大特效 2 秒裡暗幕把 3D 牌桌整個蓋住，牌桌也沒有東西在動：最多開頭補畫一次。改之前每一格都重畫（約 120 次）
+const REDRAW = `(async () => {
+  const s = BJK.view.stage;
+  await s.dealer.ready;
+  await new Promise(r => setTimeout(r, 2500));   // 等開頁的預演做完
+  let renders = 0, frames = 0, live = true;
+  const r = s.renderer, orig = r.render;
+  r.render = function () { renders++; return orig.apply(this, arguments); };
+  (function tick() { frames++; if (live) requestAnimationFrame(tick); })();
+  await BJK.view.fx.showcase('player');
+  live = false;
+  return { renders, frames };
+})()`;
+const redraw = dir => withPage(first(), DESKTOP, page => page.goto(url(dir)).then(() => page.evaluate(REDRAW, 30000)));
+
+test(`${first()}：大特效播的 2 秒裡不重畫被蓋住的 3D 牌桌（最多補畫 2 次）`, async t => {
+  const r = await redraw(APP), why = JSON.stringify(r.value);
+  t.diagnostic(`${r.value.frames} 格裡重畫 ${r.value.renders} 次`);
+  assert.ok(r.value.frames >= 30, `量法有誤：2 秒只跑了 ${r.value.frames} 格`);
+  assert.ok(r.value.renders <= 2, why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：動畫迴圈改回每一格都重畫，要判成特效期間一直重畫', t => withCopy([[path.join('js', 'view', 'anim.js'), 'if (moved) render();', 'render();']], async tmp => {
+  const r = await redraw(tmp);
+  t.diagnostic(`破壞後 ${r.value.frames} 格裡重畫 ${r.value.renders} 次`);
+  assert.ok(r.value.renders > r.value.frames / 2, JSON.stringify(r.value));
 }));

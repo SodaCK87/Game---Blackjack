@@ -20,16 +20,18 @@
   // 尺寸多夾一個 vh：橫拿的手機（844×390）照原型的大小，副標會掉出畫面底下。桌機 1280×720 與直式 390×844 算出來跟原型一樣
   const FACE = 'min(58vmin, 380px, 53vh)', TITLE = 'clamp(52px, min(14vw, 21vh), 150px)', TITLE2 = 'clamp(56px, min(15vw, 21vh), 150px)';
   const css = `
-  .bigfx { position: fixed; inset: 0; z-index: 50; overflow: hidden; pointer-events: none;
+  .bigfx, .bigfx-warm { position: fixed; inset: 0; z-index: 50; overflow: hidden; pointer-events: none;
     font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
     --ray: rgba(224, 184, 58, 0.5); --frame: #e0b83a; --glow: rgba(224, 184, 58, 0.75);
     animation: bigfx-fade var(--bigfx-d) linear forwards; }
-  .bigfx.red { --ray: rgba(179, 38, 30, 0.6); --frame: #b3261e; --glow: rgba(179, 38, 30, 0.85); }
-  .bigfx.teal { --ray: rgba(0, 128, 128, 0.55); --frame: #008080; --glow: rgba(0, 170, 170, 0.7); }
-  .bigfx svg { display: block; }
+  /* 預演（rehearse）的外框：幾乎透明。透明度 0 時瀏覽器不作畫，預演就沒有用 */
+  .bigfx-warm { opacity: 0.004 !important; }
+  :is(.bigfx, .bigfx-warm).red { --ray: rgba(179, 38, 30, 0.6); --frame: #b3261e; --glow: rgba(179, 38, 30, 0.85); }
+  :is(.bigfx, .bigfx-warm).teal { --ray: rgba(0, 128, 128, 0.55); --frame: #008080; --glow: rgba(0, 170, 170, 0.7); }
+  :is(.bigfx, .bigfx-warm) svg { display: block; }
   .bigfx-dim { position: absolute; inset: 0; background: radial-gradient(circle at 50% 40%, rgba(33, 44, 49, 0.35), rgba(12, 16, 18, 0.92) 70%); }
   /* 加倍這一幕自己畫了牌桌，底下真的牌桌（另一個荷官、對白泡泡）幾乎全遮掉，免得畫面上出現兩個荷官 */
-  .bigfx.teal .bigfx-dim { background: radial-gradient(circle at 50% 40%, rgba(24, 33, 38, 0.94), rgba(12, 16, 18, 0.98) 70%); }
+  :is(.bigfx, .bigfx-warm).teal .bigfx-dim { background: radial-gradient(circle at 50% 40%, rgba(24, 33, 38, 0.94), rgba(12, 16, 18, 0.98) 70%); }
   .bigfx-rays { position: absolute; left: 50%; top: 40%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax;
     background: repeating-conic-gradient(from 0deg, var(--ray) 0deg 6deg, transparent 6deg 15deg);
     -webkit-mask-image: radial-gradient(circle, #000 8%, transparent 45%); mask-image: radial-gradient(circle, #000 8%, transparent 45%);
@@ -287,13 +289,14 @@
     }
   }
 
+  const showHtml = p => '<div class="bigfx-dim"></div><div class="bigfx-rays"></div><div class="bigfx-chips"></div><div class="bigfx-flash"></div>' +
+    `<div class="bigfx-face">${faceSvg(p.mood)}</div><div class="bigfx-title bigfx-ink">${p.title}</div><div class="bigfx-sub bigfx-ink">${p.sub}</div>`;
+
   // kind：'player' 你拿 Blackjack（荷官驚訝臉、金色），'dealer' 荷官翻出 Blackjack（荷官得意的笑臉、紅色）。
   // 閃白 → 放射光芒 → 荷官大頭彈出 → 兩波籌碼從大頭後面噴出 → 大標砸下來、牌桌震一下 → 副標 → 淡出
   function showcase(kind) {
     const p = PRESETS[kind];
-    const html = '<div class="bigfx-dim"></div><div class="bigfx-rays"></div><div class="bigfx-chips"></div><div class="bigfx-flash"></div>' +
-      `<div class="bigfx-face">${faceSvg(p.mood)}</div><div class="bigfx-title bigfx-ink">${p.title}</div><div class="bigfx-sub bigfx-ink">${p.sub}</div>`;
-    return play(SHOW_MS, kind, p.theme, html, (el, ms) => spray(el.querySelector('.bigfx-chips'), ms));
+    return play(SHOW_MS, kind, p.theme, showHtml(p), (el, ms) => spray(el.querySelector('.bigfx-chips'), ms));
   }
 
   // 你按加倍：左上角荷官挑眉，右下角你的手把這一注最大的那片籌碼彈上桌，鏡頭推近看它斜躺著嗡嗡搖晃、停下。
@@ -302,5 +305,31 @@
     return play(DOUBLE_MS, 'double', 'teal', DOUBLE_HTML, (el, ms) => flick(el.querySelector('.bigfx-stage'), ms, amount));
   }
 
-  Object.assign(V.fx, { showcase, doubleDown });
+  // 預演：開頁閒下來時，你拿 Blackjack 與加倍兩段用幾乎透明的外框各快播一次。每段第一次作畫都要先建一堆東西
+  // （籌碼圖轉成圖檔、放射光芒、濾鏡、大字），2026-10-28 量到開頁後第一次播每段頓 1～3 格、每格 55–230 ms，
+  // 第二次就 0 格；預演過的話真的播時 0 格。荷官 Blackjack 跟你拿 Blackjack 用的是同一套，不必另外預演。
+  // 外框叫 bigfx-warm 不叫 bigfx（探針與量測都靠 .bigfx 數播了幾段、有沒有收乾淨），時間照真實時間、不跟 anim.speed，
+  // 也不算進 anim.busy：探針把 speed 調慢量大字位置時，預演不會跟著拖成好幾秒
+  const WARM_MS = 300;
+  async function warmUp(theme, html, start) {
+    const el = document.createElement('div');
+    el.className = `bigfx-warm ${theme}`;
+    el.innerHTML = html;
+    el.style.setProperty('--bigfx-d', `${WARM_MS}ms`);
+    document.body.appendChild(el);
+    try {
+      el.querySelectorAll('.bigfx-ink').forEach(centerInk);
+      start(el, WARM_MS);
+      await new Promise(r => setTimeout(r, WARM_MS));
+    } finally {
+      el.remove();
+    }
+  }
+  async function rehearse() {
+    Object.keys(V.CHIP_COLORS).forEach(v => chipUrl(Number(v)));
+    await warmUp(PRESETS.player.theme, showHtml(PRESETS.player), el => spray(el.querySelector('.bigfx-chips'), WARM_MS));
+    await warmUp('teal', DOUBLE_HTML, el => flick(el.querySelector('.bigfx-stage'), WARM_MS, V.chips.DENOMS[0]));
+  }
+
+  Object.assign(V.fx, { showcase, doubleDown, rehearse });
 })();

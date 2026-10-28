@@ -134,6 +134,9 @@
     dealer.ready.then(() => {
       status.dealer = { loaded: dealer.loaded, mood: dealer.mood };
       publish();
+      // 大特效的預演會佔掉一兩格，挑開頁後閒著的時候做（Safari 沒有 requestIdleCallback）
+      const idle = window.requestIdleCallback ? fn => requestIdleCallback(fn, { timeout: 2000 }) : fn => setTimeout(fn, 500);
+      idle(() => V.fx.rehearse());
     }, e => {
       status.dealer = { error: e.message };
       publish();
