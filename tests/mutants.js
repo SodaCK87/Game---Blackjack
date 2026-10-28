@@ -11,6 +11,9 @@ const MUTANTS = [
   ['荷官 16 點就停', 'app/js/core/game.js', 'hand.value(dealer.cards).total < 17', 'hand.value(dealer.cards).total < 16', 'tests/check_game.js'],
   ['加倍後沒自動停牌（沒到 21 還能要牌）', 'app/js/core/game.js', "} else if (action === 'double' || v.total === 21) {", '} else if (v.total === 21) {', 'tests/check_game.js'],
   ['預填的注沒對齊 step（BJK-02）', 'app/js/core/game.js', 'const bet = cap - (cap % o.step);', 'const bet = cap;', 'tests/check_game.js'],
+  // ---- v0.13.1 籌碼鈕超過就押到全部 ----
+  ['籌碼鈕超過能押的就加不上去（沒押到全部）', 'app/js/core/game.js', 'return Math.max(bet, Math.min(bet + chip, most));', 'return bet + chip <= most ? bet + chip : bet;', 'tests/check_game.js'],
+  ['押到全部時沒對齊 step', 'app/js/core/game.js', 'const most = cap - (cap % o.step);', 'const most = cap;', 'tests/check_game.js'],
   ['加倍沒扣籌碼', 'app/js/core/game.js', 's.bankroll -= h.bet;\n        h.bet *= 2;', 'h.bet *= 2;', 'tests/check_simulation.js'],
   // ---- v0.10.0 加倍只准 10、11 點，分牌看點數、不限手數 ----
   ['加倍沒照點數（頭兩張任何點數都能加倍）', 'app/js/core/game.js', 'return !v.soft && o.doubleOn.includes(v.total);', 'return true;', 'tests/check_game.js'],

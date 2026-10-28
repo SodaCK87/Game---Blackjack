@@ -339,5 +339,14 @@
     return bet >= o.minBet ? bet : 0;
   }
 
-  return { createGame, prefillBet, DEFAULTS };
+  // 下注列按一顆籌碼鈕之後的注：加上 chip，但不超過能押的最多（籌碼與上限取小、對齊 step），超過就押到全部。
+  // 回傳跟原本一樣就是加不上去，那顆鈕反灰。原本超過就反灰：籌碼 1,000、已填 10 時 +1000 按不下去，同事會以為壞了
+  function addChip(bet, chip, bankroll, rules) {
+    const o = Object.assign({}, DEFAULTS, rules);
+    const cap = Math.min(bankroll, o.maxBet);
+    const most = cap - (cap % o.step);
+    return Math.max(bet, Math.min(bet + chip, most));
+  }
+
+  return { createGame, prefillBet, addChip, DEFAULTS };
 });

@@ -1,7 +1,7 @@
 // 牌局流程與結算：用疊好的牌重現每一種結局，下注、加倍與分牌的每一種規則參數都各跑一次
 const test = require('node:test');
 const assert = require('node:assert');
-const { createGame, prefillBet, DEFAULTS } = require('../app/js/core/game.js');
+const { createGame, prefillBet, addChip, DEFAULTS } = require('../app/js/core/game.js');
 const { stackedShoe } = require('./shoe_util');
 
 const noRng = () => { throw new Error('疊牌的牌局不該用到亂數'); };
@@ -235,6 +235,17 @@ test('下注列預填的注沿用上一注，但對齊 10 的倍數、不超過�
   assert.strictEqual(prefillBet(50000, 23455), 23450);
   assert.strictEqual(prefillBet(5000, 99999, { maxBet: 1000 }), 1000);
   assert.strictEqual(prefillBet(500, 5), 0);
+});
+
+test('籌碼鈕超過能押的就押到全部（對齊 10 的倍數、不超過 maxBet）；已經押到全部就加不上去', () => {
+  assert.strictEqual(addChip(10, 1000, 1000), 1000);
+  assert.strictEqual(addChip(10, 2000, 1000), 1000);
+  assert.strictEqual(addChip(0, 2000, 1005), 1000);
+  assert.strictEqual(addChip(10, 50, 1000), 60);
+  assert.strictEqual(addChip(0, 2000, 99999), 2000);
+  assert.strictEqual(addChip(1000, 10, 1000), 1000);
+  assert.strictEqual(addChip(990, 500, 995), 990);
+  assert.strictEqual(addChip(500, 2000, 5000, { maxBet: 1000 }), 1000);
 });
 
 test('下注沒有上限：最多押上手上全部籌碼；最低注與 10 的倍數照舊，給了 maxBet 才擋', () => {

@@ -233,6 +233,46 @@ test('陽性對照：上限改回 1,000，要判成押不到 1,500', async () =>
   }
 });
 
+// 籌碼鈕超過能押的就押到全部（v0.13.1）：新玩家籌碼 1,000、開局已填 10，六顆籌碼鈕都按得下去；
+// 按 +1000 變 1,000、籌碼鈕全部反灰；清除後按 +2000 也是 1,000；發牌照常開局
+const ALL_IN = `(async () => {
+  await BJK.view.stage.dealer.ready; BJK.view.anim.speed = 40;
+  const $ = id => document.getElementById(id), hud = $('hud'), d = BJK.view.stage.director;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 25) await sleep(25); return ok(); };
+  const chip = v => document.querySelector('[data-chip="' + v + '"]');
+  const enabled = () => [...document.querySelectorAll('[data-chip]')].filter(b => !b.disabled).map(b => b.dataset.chip);
+  const start = { bet: $('bet').textContent, enabled: enabled() };
+  chip(1000).click();
+  const thousand = { bet: $('bet').textContent, enabled: enabled() };
+  $('clearBet').click();
+  chip(2000).click();
+  const two = $('bet').textContent;
+  $('dealBtn').click();
+  const started = await until(() => hud.dataset.mode === 'act' || hud.dataset.mode === 'bet', 20000);
+  return { start, thousand, two, started, onTable: d.game.state().seats.find(s => s.id === 'me').totalBet };
+})()`;
+const allIn = dir => withPage(first(), PHONE, page => page.goto(url(dir)).then(() => page.evaluate(ALL_IN, 40000)));
+
+test(`${first()}：籌碼 1,000、已填 10 時按 +1000 押到全部 1,000；+2000 也一樣，發牌照常開局`, async () => {
+  const r = await allIn(APP), why = JSON.stringify(r.value);
+  assert.deepStrictEqual(r.value.start, { bet: '10', enabled: ['10', '50', '100', '500', '1000', '2000'] }, why);
+  assert.deepStrictEqual(r.value.thousand, { bet: '1,000', enabled: [] }, why);
+  assert.deepStrictEqual([r.value.two, r.value.started, r.value.onTable], ['1,000', true, 1000], why);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：籌碼鈕改回超過就反灰，要判成 +1000 按不下去', async () => {
+  const tmp = copyWith(path.join('js', 'core', 'game.js'), 'return Math.max(bet, Math.min(bet + chip, most));', 'return bet + chip <= most ? bet + chip : bet;');
+  try {
+    const r = await allIn(tmp);
+    assert.deepStrictEqual(r.value.start.enabled, ['10', '50', '100', '500'], JSON.stringify(r.value));
+    assert.strictEqual(r.value.thousand.bet, '10');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // 5+5 對 6：點數 10 能加倍、又是一對能分，四顆鈕全出現而且都標勝率——動作列最擠的時候
 const FOUR = rigInit(deal('5', '5'));
 const FOUR_BUTTONS = `(async () => {${PLAY_UTIL}

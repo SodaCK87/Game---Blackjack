@@ -58,13 +58,18 @@
       $('bet').textContent = (mode === 'bet' ? bet : inPlay).toLocaleString();
       $('dealBtn').disabled = bet < minBet;
       $('clearBet').disabled = bet === 0;
-      for (const b of betBar.querySelectorAll('[data-chip]')) {
-        b.disabled = bet + Number(b.dataset.chip) > Math.min(bankroll, maxBet);
-      }
+      for (const b of betBar.querySelectorAll('[data-chip]')) b.disabled = added(b) === bet;
     }
 
+    // 超過能押的就押到全部（core 的 addChip），已經押到全部才反灰
+    const added = b => BJK.game.addChip(bet, Number(b.dataset.chip), bankroll, { minBet, maxBet, step });
     for (const b of betBar.querySelectorAll('[data-chip]')) {
-      b.addEventListener('click', () => { bet += Number(b.dataset.chip); V.sfx.play('chip'); refresh(); });
+      b.addEventListener('click', () => {
+        if (added(b) === bet) return;
+        bet = added(b);
+        V.sfx.play('chip');
+        refresh();
+      });
     }
     $('clearBet').addEventListener('click', () => { bet = 0; refresh(); });
     $('dealBtn').addEventListener('click', () => {
