@@ -100,10 +100,12 @@
     // 畫面上的籌碼數字照事件一筆一筆加減，不直接讀引擎：引擎一次就把整局結算完，直接讀的話荷官還在翻牌，
     // 籌碼就已經是結算後的數字。每批事件演完 verify() 照舊拿它跟引擎比
     const money = { bank: new Map(), onTable: 0 };
+    // 引擎結算完（idle）還留著上一局的手與注，那時桌上其實已經沒有籌碼；照讀的話，下一局的下注會疊上上一局的（BJK-08）
+    const onTableOf = st => (st.phase === 'idle' ? 0 : st.seats.find(s => s.id === 'me').totalBet);
     function syncMoney() {
       const st = game.state();
       for (const s of st.seats) money.bank.set(s.id, s.bankroll);
-      money.onTable = st.seats.find(s => s.id === 'me').totalBet;
+      money.onTable = onTableOf(st);
     }
     function applyMoney(e) {
       const delta = { bet: -e.amount, split: -e.amount, double: -e.amount / 2, settle: e.bet + e.net }[e.type];
@@ -543,6 +545,9 @@
       const bank = Number(document.getElementById('bank').textContent.replace(/,/g, ''));
       const me = st.seats.find(s => s.id === 'me').bankroll;
       if (bank !== me) fail(`畫面上的籌碼 ${bank} ≠ 引擎 ${me}`);
+      // 牌局中操作列的「下注」顯示桌上押的（加倍、分牌都算進去）
+      const shownBet = Number(document.getElementById('bet').textContent.replace(/,/g, ''));
+      if (shownBet !== onTableOf(st)) fail(`畫面上的下注 ${shownBet} ≠ 引擎 ${onTableOf(st)}`);
     }
 
     // 勝率只用畫面上翻開的牌算（rotation.z === 0），荷官的底牌蓋著就拿不到；不准改成去讀引擎狀態。

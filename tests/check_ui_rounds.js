@@ -348,6 +348,42 @@ test('陽性對照：好幾手全擺在同一個位置，要判成牌與標籤�
   }
 });
 
+// BJK-08：上一局押 100，這一局清除後按兩下 +100 改押 200，發牌後操作列的「下注」要是 200（v0.11.1～v0.12.1 疊上上一局顯示 300）。
+// 兩局你都拿 10＋7 停牌、荷官 16 補 10 爆，一定會輪到你，第一局贏 100
+const TWO_BETS = rigInit([...deal('10', '7'), '10', ...deal('10', '7')]);
+const CLICK_TWO_BETS = `(async () => {${PLAY_UTIL}
+  const before = { mode: hud.dataset.mode, bet: $('bet').textContent };
+  await press('standBtn');
+  const chip = document.querySelector('[data-chip="100"]');
+  $('clearBet').click(); chip.click(); chip.click();
+  const ready = { mode: hud.dataset.mode, bet: $('bet').textContent };
+  $('dealBtn').click();
+  await until(() => hud.dataset.mode === 'act' || hud.dataset.mode === 'bet', 15000);
+  return { before, ready, after: { mode: hud.dataset.mode, bank: $('bank').textContent, bet: $('bet').textContent }, mismatches: d.mismatches };
+})()`;
+const clickTwoBets = dir => withPage(first(), { ...DESKTOP, init: TWO_BETS }, page => page.goto(url(dir)).then(() => page.evaluate(CLICK_TWO_BETS, 60000)));
+
+test(`${first()}：上一局押 100、這一局改押 200，發牌後「下注」顯示 200，不疊上上一局（BJK-08）`, async () => {
+  const r = await clickTwoBets(APP);
+  assert.deepStrictEqual(r.value, {
+    before: { mode: 'act', bet: '100' },
+    ready: { mode: 'bet', bet: '200' },
+    after: { mode: 'act', bank: '900', bet: '200' },
+    mismatches: [],
+  });
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：局與局之間照讀引擎留著的上一局注，第二局發牌後要判成「下注」顯示 300', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'money.onTable = onTableOf(st);', "money.onTable = st.seats.find(s => s.id === 'me').totalBet;");
+  try {
+    const r = await clickTwoBets(tmp);
+    assert.deepStrictEqual(r.value.after, { mode: 'act', bank: '900', bet: '300' });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('陽性對照：外排的籌碼擠到裡排籌碼的位置，要判成籌碼互相壓住', async () => {
   const tmp = copyWith(path.join('js', 'view', 'director.js'), 'chipR = R_HAND - 0.1 + 1.185 * a.s;', 'chipR = R_HAND - 0.1 + 0.7 * a.s;');
   try {

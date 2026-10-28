@@ -134,6 +134,9 @@ test('陽性對照：分牌沒推出新的一份籌碼，要抓到「新的一�
 test('陽性對照：藍圈一直停在第一手，輪到第二手時要抓到「藍圈沒有指到那一手」', () => caught(
   'ringTo(e.seat, e.hand);', 'ringTo(e.seat, 0);', /輪到 你 第 2 手時，藍圈沒有指到那一手/));
 
+test('陽性對照：局與局之間照讀引擎留著的上一局注，要抓到「畫面上的下注」對不上（BJK-08）', () => caught(
+  'money.onTable = onTableOf(st);', "money.onTable = st.seats.find(s => s.id === 'me').totalBet;", /第 2 局：畫面上的下注 \d+ ≠ 引擎/));
+
 test('陽性對照：規則改回荷官先偷看，第 2 局要判成沒輪到你就結算', async () => {
   const tmp = brokenCopy(path.join('js', 'core', 'game.js'), 'peek: false,', 'peek: true,');
   try {
