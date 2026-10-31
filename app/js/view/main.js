@@ -27,7 +27,8 @@
     const canvas = document.getElementById('table');
     const hudEl = document.getElementById('hud');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const BASE_RATIO = Math.min(window.devicePixelRatio, 2);
+    renderer.setPixelRatio(BASE_RATIO);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -134,6 +135,24 @@
     V.stage = { scene, camera, renderer, table: T, room, dealer, render, director };
     window.addEventListener('resize', layout);
     layout();
+    // 雙指放大時瀏覽器只是把畫布這張點陣圖拉大，牌就糊了（疊在上面的 HTML 字不會）。手勢停下來後照倍數重畫一張，
+    // 縮回去換回原本的解析度：沒放大時一格的成本不變，也不必開迴圈。解析度是整張畫布一起提高的，總像素要壓住
+    const MAX_ZOOM_PIXELS = 5e6;
+    function matchZoom() {
+      const w = canvas.clientWidth, h = canvas.clientHeight, scale = window.visualViewport.scale;
+      const cap = Math.min(Math.sqrt(MAX_ZOOM_PIXELS / (w * h)), renderer.capabilities.maxTextureSize / Math.max(w, h));
+      const ratio = scale > 1.05 ? Math.max(BASE_RATIO, Math.min(window.devicePixelRatio * scale, cap)) : BASE_RATIO;
+      if (ratio === renderer.getPixelRatio()) return;
+      renderer.setPixelRatio(ratio);
+      render();
+    }
+    let zoomTimer = null;
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        clearTimeout(zoomTimer);
+        zoomTimer = setTimeout(matchZoom, 200);
+      });
+    }
     status.render = 'ok';
     dealer.ready.then(() => {
       status.dealer = { loaded: dealer.loaded, mood: dealer.mood };

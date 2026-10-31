@@ -124,8 +124,8 @@ function connect(wsUrl) {
   });
 }
 
-// size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2）；init：每次載入時比頁面自己的 script 先跑的程式碼
-async function withPage(browser, { size = [1280, 720], mobile = false, init = '' } = {}, fn) {
+// size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2，iPhone 那種 3 用 dpr 給）；init：每次載入時比頁面自己的 script 先跑的程式碼
+async function withPage(browser, { size = [1280, 720], mobile = false, init = '', dpr = mobile ? 2 : 1 } = {}, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_PREFIX));
   const marker = path.basename(dir);
   const args = ['--headless=new', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
@@ -171,7 +171,7 @@ async function withPage(browser, { size = [1280, 720], mobile = false, init = ''
     });
     if (init) await client.send('Page.addScriptToEvaluateOnNewDocument', { source: init });
     await client.send('Emulation.setDeviceMetricsOverride', {
-      width: size[0], height: size[1], deviceScaleFactor: mobile ? 2 : 1, mobile,
+      width: size[0], height: size[1], deviceScaleFactor: dpr, mobile,
     });
     if (mobile) await client.send('Emulation.setTouchEmulationEnabled', { enabled: true });
 
@@ -198,8 +198,14 @@ async function withPage(browser, { size = [1280, 720], mobile = false, init = ''
           await client.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
         }
       },
-      async screenshot(file) {
-        const r = await client.send('Page.captureScreenshot', { format: 'png' });
+      // 雙指放大到 scale 倍（1＝沒放大）。Input.synthesizePinchGesture 在這台的無頭模式回成功、visualViewport.scale 卻不動，
+      // 所以走 Emulation；呼叫端要讀 visualViewport.scale 確認真的變了
+      async zoom(scale) {
+        await client.send('Emulation.setPageScaleFactor', { pageScaleFactor: scale });
+      },
+      // clip：{ x, y, width, height, scale } 只截畫面上那一塊，CSS 像素，scale 是放大幾倍
+      async screenshot(file, clip) {
+        const r = await client.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip } : {}) });
         fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
       },
       console: result.console,

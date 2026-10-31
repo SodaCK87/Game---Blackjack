@@ -3,24 +3,19 @@
   const V = window.BJK.view;
   const W = 0.55, H = 0.77, T = 0.008;
 
-  // BoxGeometry 六面的 group 順序是 +x −x +y −y +z −z，一面一個 draw call。keep 那幾面留給第二種材質，其餘併成第一種
-  function twoGroups(geometry, keep) {
-    const index = [...geometry.index.array], first = [], second = [];
-    geometry.groups.forEach((g, face) => (keep.includes(face) ? second : first).push(...index.slice(g.start, g.start + g.count)));
-    geometry.setIndex([...first, ...second]);
+  // BoxGeometry 六面的 group 順序是 +x −x +y −y +z −z，一面一個 draw call。sets 的每一組面併成一個 group，沒列到的面不畫
+  function mergeFaces(geometry, sets) {
+    const index = [...geometry.index.array], groups = geometry.groups;
+    const merged = sets.map(faces => faces.flatMap(f => index.slice(groups[f].start, groups[f].start + groups[f].count)));
+    geometry.setIndex(merged.flat());
     geometry.clearGroups();
-    geometry.addGroup(0, first.length, 0);
-    geometry.addGroup(first.length, second.length, 1);
+    let start = 0;
+    merged.forEach((list, i) => { geometry.addGroup(start, list.length, i); start += list.length; });
     return geometry;
   }
 
-  // 牌只有上下兩面：四個側邊併進上面那組，UV 指到貼圖頂端的邊框，牌面朝上是米白、牌背朝上是青色
-  const geometry = (() => {
-    const g = twoGroups(new THREE.BoxGeometry(W, T, H), [3]);
-    const uv = g.attributes.uv, normal = g.attributes.normal;
-    for (let i = 0; i < uv.count; i++) if (Math.abs(normal.getY(i)) < 0.5) uv.setXY(i, 0.5, 0.97);
-    return g;
-  })();
+  // 牌只畫上下兩面：側邊比一個像素還薄，畫了只會在牌緣留下鋸齒、在疊牌的交界留下斷續的點（2026-10-31 放大才看到）
+  const geometry = mergeFaces(new THREE.BoxGeometry(W, T, H), [[2], [3]]);
 
   function material(map) {
     return new THREE.MeshLambertMaterial({ map, alphaTest: 0.5, alphaToCoverage: true });
@@ -50,7 +45,7 @@
   const deckEdge = new THREE.MeshLambertMaterial({ map: V.textures.deckEdge() });
   function deck(height) {
     const back = cachedMaterial('back', V.textures.cardBack);
-    const mesh = new THREE.Mesh(twoGroups(new THREE.BoxGeometry(W, height, H), [2]), [deckEdge, back]);
+    const mesh = new THREE.Mesh(mergeFaces(new THREE.BoxGeometry(W, height, H), [[0, 1, 3, 4, 5], [2]]), [deckEdge, back]);
     mesh.castShadow = true;
     return mesh;
   }

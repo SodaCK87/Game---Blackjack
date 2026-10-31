@@ -182,15 +182,16 @@
     ctx.restore();
   }
 
+  // 牌面鋪滿畫布，只有四個圓角透明：四邊留透明的話，牌緣要靠貼圖挖出來，斜著看是一圈鋸齒
   function cardShape(ctx, fill) {
-    ctx.beginPath(); ctx.roundRect(2, 2, CW - 4, CH - 4, 22);
+    ctx.beginPath(); ctx.roundRect(0, 0, CW, CH, 22);
     ctx.fillStyle = fill; ctx.fill();
   }
 
   // 紙面微微的光澤：左上亮、右下暗，貼在牌面與牌背最上層
   function sheen(ctx) {
     ctx.save();
-    ctx.beginPath(); ctx.roundRect(2, 2, CW - 4, CH - 4, 22); ctx.clip();
+    ctx.beginPath(); ctx.roundRect(0, 0, CW, CH, 22); ctx.clip();
     const g = ctx.createLinearGradient(0, 0, CW, CH);
     g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.45, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(33,44,49,0.1)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
@@ -314,7 +315,7 @@
   function cardFace(rank, suit) {
     const c = canvas(CW, CH), ctx = c.getContext('2d');
     cardShape(ctx, V.COLORS.cardFace);
-    ctx.strokeStyle = 'rgba(33,44,49,0.25)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = 'rgba(33,44,49,0.3)'; ctx.lineWidth = 5; ctx.stroke();
     const color = suitColor(suit);
     for (const flip of [false, true]) {
       ctx.save();

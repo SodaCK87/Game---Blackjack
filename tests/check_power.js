@@ -1,5 +1,6 @@
 // 守手機節電的前提（使用者 2026-10-22 選靜態、2026-10-31 要精緻度時再次定為前提）：畫面沒動就不重畫；
-// 每一格的 draw call 在預算內；120Hz 手機上補間不超過約 60 格；手機上陰影貼圖寫的像素不比畫面本身多。
+// 每一格的 draw call 在預算內；120Hz 手機上補間不超過約 60 格；手機上陰影貼圖寫的像素不比畫面本身多；
+// 雙指放大時才提高解析度，放大停下來只補畫一次。
 // 驗不到：真手機的耗電瓦數（這台只有 Radeon 內顯，CDP 模擬尺寸不換 GPU）；真手機的發熱與降頻。
 // 貼圖要多少記憶體、一格要畫幾毫秒只印不判：那些數字隨機器變，記在 docs\perf-baseline.md。
 const test = require('node:test');
@@ -135,10 +136,70 @@ test(`${first()}：120Hz 手機上補間一秒重畫不超過約 60 次，一般
   assert.ok(normal.renders >= 45, `一般螢幕 1 秒的補間只畫了 ${normal.renders} 次，動畫會變卡：${JSON.stringify(normal)}`);
 });
 
+// 手機雙指放大（使用者 2026-10-31 回報放大看牌都是模糊的）：瀏覽器只是把畫布這張點陣圖拉大，HTML 的字是清楚的。
+// 放大停下來要照倍數重畫一次、之後不再重畫，縮回去換回原本的解析度。平常的解析度不准因此變高，那才是耗電的地方
+const MAX_ZOOM_PIXELS = 5.2e6;
+const ZOOM_READ = `(() => {
+  const gl = BJK.view.stage.renderer.getContext(), c = document.getElementById('table');
+  return { scale: visualViewport.scale, renders: window.__renders, density: gl.drawingBufferWidth / c.clientWidth, pixels: gl.drawingBufferWidth * gl.drawingBufferHeight };
+})()`;
+const pause = ms => new Promise(r => setTimeout(r, ms));
+async function zoomed(dir, dpr) {
+  const r = await withPage(first(), { ...PHONE, dpr }, async page => {
+    await page.goto(url(dir));
+    await page.evaluate(`(async () => {
+      ${SETTLED}
+      window.__renders = 0;
+      const R = s.renderer, orig = R.render;
+      R.render = function () { window.__renders++; return orig.apply(this, arguments); };
+    })()`);
+    const rest = await page.evaluate(ZOOM_READ);
+    await page.zoom(3);
+    await pause(1000);
+    const zoom = await page.evaluate(ZOOM_READ);
+    await pause(1500);
+    const later = await page.evaluate(ZOOM_READ);
+    await page.zoom(1);
+    await pause(1000);
+    const back = await page.evaluate(ZOOM_READ);
+    return { rest, zoom, later, back };
+  });
+  return { ...r.value, console: r.console };
+}
+function assertZoom(m) {
+  const why = JSON.stringify(m);
+  assert.strictEqual(m.zoom.scale, 3, `量法有誤：放大沒有生效：${why}`);
+  assert.strictEqual(m.rest.density, 2, `沒放大時解析度變了，一格的成本會跟著變：${why}`);
+  assert.ok(m.zoom.density >= 4, `放大 3 倍後畫布解析度只有 ${m.zoom.density}，牌會糊：${why}`);
+  assert.ok(m.zoom.pixels <= MAX_ZOOM_PIXELS, `放大後畫布 ${m.zoom.pixels} 像素，手機記憶體撐不住：${why}`);
+  assert.ok(m.zoom.renders - m.rest.renders <= 2, `放大時補畫太多次：${why}`);
+  assert.strictEqual(m.later.renders, m.zoom.renders, `放大停下來之後還在重畫：${why}`);
+  assert.strictEqual(m.back.density, m.rest.density, `縮回去之後解析度沒換回來：${why}`);
+}
+
+for (const dpr of [2, 3]) {
+  test(`${first()}：螢幕密度 ${dpr} 的手機放大 3 倍時畫布解析度跟上，只補畫一次，縮回去換回原本的`, async t => {
+    const m = await zoomed(APP, dpr);
+    t.diagnostic(`解析度 ${m.rest.density} → ${m.zoom.density.toFixed(2)} → ${m.back.density}；放大後 ${m.zoom.pixels} 像素；補畫 ${m.zoom.renders} 次`);
+    assertZoom(m);
+    assert.deepStrictEqual(m.console, []);
+  });
+}
+
 function withCopy(file, from, to, fn) {
   const tmp = copyWith(file, from, to);
   return fn(tmp).finally(() => fs.rmSync(tmp, { recursive: true, force: true }));
 }
+
+test('陽性對照：拿掉放大時補畫，要判成牌會糊', () => withCopy(MAIN, 'zoomTimer = setTimeout(matchZoom, 200);', '', async tmp => {
+  const m = await zoomed(tmp, 2);
+  assert.throws(() => assertZoom(m), /牌會糊/);
+}));
+
+test('陽性對照：放大的解析度不設上限，要判成記憶體撐不住', () => withCopy(MAIN, 'Math.sqrt(MAX_ZOOM_PIXELS / (w * h))', '99', async tmp => {
+  const m = await zoomed(tmp, 3);
+  assert.throws(() => assertZoom(m), /記憶體撐不住/);
+}));
 
 test('陽性對照：開一條一直重畫的迴圈，要判成沒動也重畫', () => withCopy(MAIN, 'V.anim.setRender(render);',
   'V.anim.setRender(render); (function loop() { render(); requestAnimationFrame(loop); })();', async tmp => {
