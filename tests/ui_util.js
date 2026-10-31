@@ -53,7 +53,10 @@ function assertButtonsFit(m, what) {
     assert.ok(b.left >= m.hud.left && b.right <= m.hud.right && b.top >= m.hud.top && b.bottom <= m.hud.bottom, `${what} 的「${b.text}」跑出操作列：${why}`);
     assert.ok(Math.abs(b.top - firstTop) < 1, `${what} 的按鈕沒排在同一列：${why}`);
     assert.ok(b.bottom - b.top >= 36, `${what} 的「${b.text}」太矮，手指不好按：${why}`);
+    assert.ok(b.right - b.left >= 70, `${what} 的「${b.text}」太窄，手指不好按：${why}`);
   }
+  const row = [...m.buttons].sort((a, b) => a.left - b.left);
+  row.slice(1).forEach((b, i) => assert.ok(b.left - row[i].right >= 8, `${what} 的「${row[i].text}」與「${b.text}」靠太近，會按到隔壁：${why}`));
   assert.deepStrictEqual(pairsOverlapping(m.buttons), [], `${what} 的按鈕互相重疊`);
 }
 

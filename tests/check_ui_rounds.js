@@ -292,8 +292,9 @@ for (const browser of availableBrowsers()) {
   }
 }
 
-test('陽性對照：手機上勝率不拆兩行，四顆動作鈕要判成換行超出', async () => {
-  const tmp = copyWith('style.css', '#actBar .odds span {\n    display: block;', '#actBar .odds span {\n    display: inline;');
+// 動作鈕平分整排之後，勝率不拆兩行也擠得進去（會自己折行），所以改用不肯縮的按鈕逼它排不下
+test('陽性對照：動作鈕不肯縮，四顆排不進一排，要判成換行超出', async () => {
+  const tmp = copyWith('style.css', '  flex: 1 1 0;\n  max-width: 170px;\n', '  flex: none;\n  width: 100px;\n');
   try {
     const r = await fourButtons(first(), SMALL_PHONE, tmp);
     assert.throws(() => assertButtonsFit(r.value, '四顆的動作列'), /換行|同一列|跑出/);
@@ -301,6 +302,21 @@ test('陽性對照：手機上勝率不拆兩行，四顆動作鈕要判成換�
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+for (const [name, from, to, expect] of [
+  ['手機上動作鈕的間距改回 4px，要判成靠太近', '#actBar {\n    gap: 10px;', '#actBar {\n    gap: 4px;', /靠太近/],
+  ['動作鈕改回照字寬、不平分整排，要判成太窄', '  flex: 1 1 0;\n  max-width: 170px;\n', '', /太窄/],
+]) {
+  test(`陽性對照：${name}`, async () => {
+    const tmp = copyWith('style.css', from, to);
+    try {
+      const r = await fourButtons(first(), PHONE, tmp);
+      assert.throws(() => assertButtonsFit(r.value, '四顆的動作列'), expect);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
 
 // 一個座位分成很多手：停在最後一手又成對、問你要牌、停牌或再分的那一刻（畫面靜止），量每一手的牌（四個角投影成四邊形）、
 // 籌碼（外接盒投影）、點數標籤，跟其他手、其他座位、荷官的牌與名牌兩兩比，不准重疊、不准跑出牌桌畫布

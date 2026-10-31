@@ -245,6 +245,13 @@ body[data-fatal] #soundToggle {
   gap: 12px;
 }
 
+/* 動作鈕一樣寬、平分整排（每顆最寬 170px，見 #actBar button），顆數變了寬度跟著分；間距拉開，手指才不會按到隔壁 */
+#actBar {
+  gap: 14px;
+  width: 100%;
+  max-width: 722px;
+}
+
 #hud button {
   min-width: 52px;
   padding: 8px 12px;
@@ -304,6 +311,8 @@ body[data-fatal] #soundToggle {
    上面疊一層跟按鈕內框一樣大的 .big，字級照它的寬高算，動作名放大塞滿，手機上比較好讀 */
 #actBar button {
   position: relative;
+  flex: 1 1 0;
+  max-width: 170px;
 }
 
 #actBar .big {
@@ -439,6 +448,10 @@ body[data-fatal] #soundToggle {
   .total.mini {
     font-size: 10px;
     padding: 0 3px;
+  }
+
+  #actBar {
+    gap: 10px;
   }
 
   /* 動作列最多四顆（能分牌又能加倍時）：勝率拆成「勝」「平」兩行，按鈕就窄得排進一排；
