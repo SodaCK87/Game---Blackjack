@@ -162,9 +162,14 @@
     }
     const ringSpot = (id, k, n) => chipBase(id, k, n).setY(0.015);
     const ringScale = (k, n) => (n === 1 ? 1 : Math.min(arrange(n)[k].s, arrange(n)[k].cw * 0.9));
-    // 點數標籤：一手時照舊在最後一張牌上方；分成好幾手時放在牌的外側，裡排往荷官那邊、外排往玩家那邊
-    function labelPos(id, k, n, m) {
-      if (n === 1) return cardPos(id, k, 1, Math.max(0, m - 1), m).add(new THREE.Vector3(0, 0.45, 0));
+    // 一手牌在畫面上的上緣：側邊座位的牌是斜的，最高的是牌角，要四個角都算
+    function cardsTop(centers, side, up) {
+      const ys = centers.flatMap(c => [-1, 1].flatMap(a => [-1, 1].map(b =>
+        project(c.clone().addScaledVector(side, a * V.cards.W / 2).addScaledVector(up, b * V.cards.H / 2)).y)));
+      return Math.min(...ys);
+    }
+    // 點數標籤分成好幾手時放在牌的外側，裡排往荷官那邊、外排往玩家那邊；一手時貼在牌的上緣外面（cardsTop），不蓋住牌角的點數
+    function labelPos(id, k, n) {
       const sp = spot(k, n), off = 0.385 * sp.s + 0.2;
       return outward(id).multiplyScalar(sp.cardR + (sp.row === 1 ? off : -off)).addScaledVector(tangent(id), sp.x).setY(0.05);
     }
@@ -189,10 +194,11 @@
       while (pool.length < n) pool.push(label('total'));
       return pool;
     }
-    function place(el, p) {
+    // topY 給了就把標籤放在那條線上面，不用 p 的高度
+    function place(el, p, topY) {
       const s = project(p);
       el.style.left = `${s.x}px`;
-      el.style.top = `${s.y}px`;
+      el.style.top = `${topY === undefined ? s.y : topY - el.offsetHeight / 2 - 3}px`;
       FX.keepInView(el);
     }
     function visibleValue(list) {
@@ -236,7 +242,12 @@
           el.textContent = n > 1 ? miniText(v) : totalText(v);
           el.classList.toggle('bust', v.bust);
           el.classList.toggle('mini', n > 1);
-          place(el, labelPos(s.id, k, n, list[k].cards.length));
+          if (n === 1) {
+            const m = list[0].cards.length, centers = list[0].cards.map((_, i) => cardPos(s.id, 0, 1, i, m));
+            place(el, centers[m - 1], cardsTop(centers, tangent(s.id), outward(s.id)));
+          } else {
+            place(el, labelPos(s.id, k, n));
+          }
           placed.push({ el, k });
           shown.push(el);
         });
@@ -247,7 +258,8 @@
       if (dv) {
         dealerTotal.textContent = totalText(dv);
         dealerTotal.classList.toggle('bust', dv.bust);
-        place(dealerTotal, cardPos('dealer', 0, 1, Math.max(0, dealerCards.length - 1)).add(new THREE.Vector3(0, 0.45, 0)));
+        const centers = dealerCards.map((_, i) => cardPos('dealer', 0, 1, i));
+        place(dealerTotal, centers[centers.length - 1], cardsTop(centers, new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1)));
       }
       declutter([...shown, dealerTotal, ...Object.values(tags)]);
     }

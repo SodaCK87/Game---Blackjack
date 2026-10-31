@@ -390,6 +390,49 @@ test(`${first()}：荷官翻牌、爆牌時籌碼還是押注後的數字，結�
   assert.deepStrictEqual(r.console, []);
 });
 
+// 手機上一張牌只有約 55 CSS 像素寬，點數標籤蓋到牌角就看不出是什麼牌（2026-10-31 使用者要精緻度時看截圖發現）。
+// 每張翻開的牌取左上角標那一塊（點數加花色）投影到畫面，不准跟任何點數標籤重疊
+const CORNERS = `(async () => {
+  ${PLAY_UTIL}
+  const s = BJK.view.stage, V = BJK.view, W = V.cards.W, H = V.cards.H, canvas = document.getElementById('table');
+  const labels = [...document.querySelectorAll('#overlay .total')].filter(el => !el.hidden).map(box);
+  const corner = [[0.02, 0.03], [0.13, 0.03], [0.02, 0.23], [0.13, 0.23]];
+  const hits = [];
+  let cards = 0;
+  s.scene.traverse(o => {
+    if (o.userData.kind !== 'card' || o.rotation.z !== 0) return;
+    cards++;
+    o.updateWorldMatrix(true, false);
+    const pts = corner.map(([x, z]) => {
+      const p = new THREE.Vector3(x - W / 2, 0, z - H / 2).applyMatrix4(o.matrixWorld).project(s.camera);
+      return { x: (p.x + 1) / 2 * canvas.clientWidth, y: (1 - p.y) / 2 * canvas.clientHeight };
+    });
+    const r = { left: Math.min(...pts.map(p => p.x)), right: Math.max(...pts.map(p => p.x)), top: Math.min(...pts.map(p => p.y)), bottom: Math.max(...pts.map(p => p.y)) };
+    if (labels.some(l => l.left < r.right && r.left < l.right && l.top < r.bottom && r.top < l.bottom)) hits.push(o.userData.rank + o.userData.suit);
+  });
+  return { mode: hud.dataset.mode, cards, labels: labels.length, hits };
+})()`;
+const corners = (dir, viewport) => withPage(first(), { ...viewport, init: rigInit(deal('10', '6')) }, page => page.goto(url(dir)).then(() => page.evaluate(CORNERS, 30000)));
+
+for (const [name, viewport] of [['手機', PHONE], ['桌機', DESKTOP]]) {
+  test(`${first()}・${name}：點數標籤不蓋住牌角的點數`, async () => {
+    const r = await corners(APP, viewport), why = JSON.stringify(r.value);
+    assert.strictEqual(r.value.mode, 'act', `量法有誤：沒有打到輪到你：${why}`);
+    assert.ok(r.value.cards >= 9 && r.value.labels >= 5, `量法有誤：桌上的牌或標籤太少：${why}`);
+    assert.deepStrictEqual(r.value.hits, [], why);
+  });
+}
+
+test('陽性對照：標籤改回疊在牌上，要判成蓋住牌角', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'director.js'), 'topY - el.offsetHeight / 2 - 3', 'topY + 14');
+  try {
+    const r = await corners(tmp, PHONE);
+    assert.ok(r.value.hits.length > 0, JSON.stringify(r.value));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // 翻牌那一句講出來時標籤還沒更新，所以壞掉的樣子是在荷官爆牌那一句就已經是結算後的數字
 test('陽性對照：籌碼數字改回直接讀引擎，要判成荷官還沒結算就已經是結算後的數字', async () => {
   const tmp = copyWith(path.join('js', 'view', 'director.js'), "hud.setBank(money.bank.get('me'), money.onTable);",

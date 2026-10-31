@@ -8,6 +8,10 @@
   let render = () => {};
   let frameId = null;
   let dirty = false;
+  // 120Hz 手機的 rAF 一秒跑 120 次，補間看起來跟 60 格差不多，電卻多花一倍：離上一格太近的那格跳過。
+  // 門檻 10 毫秒：120Hz（8.3）隔格畫，90Hz（11.1）照畫，不會掉到 45 格
+  const MIN_GAP = 10;
+  let lastDraw = -Infinity;
 
   const ease = {
     linear: t => t,
@@ -20,6 +24,8 @@
   }
   function frame(now) {
     frameId = null;
+    if (now - lastDraw < MIN_GAP) { kick(); return; }
+    lastDraw = now;
     let moved = dirty;
     dirty = false;
     for (const job of [...active]) {

@@ -48,16 +48,27 @@ const MEASURE = `(async () => {
   hidden.forEach(o => { o.visible = true; });
   s.render();
 
-  const bokeh = [];
-  s.room.group.traverse(o => { if (o.userData.kind === 'bokeh' && o.visible) bokeh.push(o); });
-  const shown = bokeh.filter(o => { const v = o.position.clone().project(s.camera); return Math.abs(v.x) <= 1 && v.y <= 1 && v.y > wallTop; });
+  // 光點畫在同一張圖上，數物件數不出來：把大廳那一帶切成格子，跟同一列的中位數比（底色上下有漸層），
+  // 比中位數亮的格子才是光點；亮起來的格子散在左右兩邊才算鋪得開
+  const bandH = H - wallRow - 2, COLS = 24, ROWS = 8, lit = [];
+  let totalCells = 0;
+  for (let j = 0; j < ROWS; j++) {
+    const row = [];
+    for (let i = 0; i < COLS; i++) row.push({ i, m: mean(bare, Math.floor(i * W / COLS), Math.floor((i + 1) * W / COLS), wallRow + 2 + Math.floor(j * bandH / ROWS), wallRow + 2 + Math.floor((j + 1) * bandH / ROWS)) });
+    const median = row.map(c => c.m).sort((a, b) => a - b)[COLS >> 1];
+    lit.push(...row.filter(c => c.m > median + 0.5));
+    totalCells += COLS;
+  }
+  const backdrop = s.room.backdrop;
+  backdrop.updateMatrixWorld();
+  const backZ = [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]].map(([x, y]) => new THREE.Vector3(x, y, 0).applyMatrix4(backdrop.matrixWorld).z);
   return {
     wallTop, bandFrac: (1 - wallTop) / 2,
     feltLum: felt.reduce((a, b) => a + b, 0) / felt.length,
     bandLum: mean(bare, 0, W, wallRow + 2, H),
     lowerLum: mean(bare, 0, W, 0, wallRow - 2),
-    bokehShown: shown.length, bokehTotal: bokeh.length,
-    frontMostZ: Math.max(...bokeh.map(o => o.position.z)), wallZ: V.room.WALL_Z,
+    litCells: lit.length, totalCells, litLeft: lit.filter(c => c.i < COLS / 2).length, litRight: lit.filter(c => c.i >= COLS / 2).length,
+    frontMostZ: Math.max(...backZ), wallZ: V.room.WALL_Z,
   };
 })()`;
 
@@ -73,7 +84,7 @@ function assertRoom(m, what) {
   const why = `${what}：${JSON.stringify(m)}`;
   assert.deepStrictEqual(m.console, [], why);
   assert.ok(m.bandFrac >= 0.1, `牆上緣以上留給大廳的不到畫面一成：${why}`);
-  assert.ok(m.bokehShown >= 30, `看得到的光點太少：${why}`);
+  assert.ok(m.litCells >= m.totalCells / 8 && m.litLeft >= m.totalCells / 32 && m.litRight >= m.totalCells / 32, `看得到的光點太少或全擠在一邊：${why}`);
   assert.ok(m.frontMostZ < m.wallZ, `有光點跑到牆前面：${why}`);
   // 2026-10-22 量到背景約是絨布的兩到三成亮；門檻抓四成，再亮就是在跟牌桌搶眼
   assert.ok(m.bandLum < 0.4 * m.feltLum && m.lowerLum < 0.4 * m.feltLum, `背景太亮，跟牌桌搶眼：${why}`);
@@ -97,14 +108,15 @@ const first = availableBrowsers()[0];
 for (const [name, viewport] of Object.entries(VIEWPORTS)) {
   test(`${first}・${name}：牆上方留得出大廳光點、光點都在牆後、背景不到牌桌的四成亮`, async t => {
     const m = await measure(first, APP, viewport);
-    t.diagnostic(`牆上緣 ${(m.bandFrac * 100).toFixed(0)}% 畫面；光點 ${m.bokehShown}/${m.bokehTotal}；亮度 大廳 ${m.bandLum.toFixed(1)}、牆與地毯 ${m.lowerLum.toFixed(1)}、絨布 ${m.feltLum.toFixed(1)}`);
+    t.diagnostic(`牆上緣 ${(m.bandFrac * 100).toFixed(0)}% 畫面；亮格 ${m.litCells}/${m.totalCells}；亮度 大廳 ${m.bandLum.toFixed(1)}、牆與地毯 ${m.lowerLum.toFixed(1)}、絨布 ${m.feltLum.toFixed(1)}`);
     assertRoom(m, name);
   });
 }
 
 const ROOM = path.join('js', 'view', 'room.js');
 const CONTROLS = [
-  ['光點擺到牆前面', VIEWPORTS.桌機, [[ROOM, 'WALL_Z - 3 - (i % 7) * 2', 'WALL_Z + 6 - (i % 7) * 2']], /光點跑到牆前面/],
+  ['大廳那張圖擺到牆前面', VIEWPORTS.桌機, [[ROOM, 'const BACK_DIST = 60;', 'const BACK_DIST = 5;']], /光點跑到牆前面/],
+  ['大廳那張圖沒畫光點', VIEWPORTS.直式手機, [[ROOM, 'V.textures.paintHall(hall, plan, w, h, VOID);', 'V.textures.paintHall(hall, [], w, h, VOID);']], /光點太少/],
   ['大廳底色調亮', VIEWPORTS.直式手機, [[ROOM, 'const VOID = 0x0d1215;', 'const VOID = 0x5a6468;']], /背景太亮/],
   ['牆加高到擋住大廳', VIEWPORTS.桌機, [[ROOM, 'WALL_H = 1.3', 'WALL_H = 6']], /留給大廳的不到畫面一成/],
 ];

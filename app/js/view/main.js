@@ -45,7 +45,9 @@
     lamp.position.set(0, 10, 2.5);
     lamp.target.position.set(0, 0, 2.2);
     lamp.castShadow = true;
-    lamp.shadow.mapSize.set(2048, 2048);
+    // 手機的陰影貼圖縮成 1024：2048 一格要寫四百萬個像素，是手機畫面本身的四倍，全是記憶體流量
+    const shadowSize = Math.min(window.innerWidth, window.innerHeight) < 700 ? 1024 : 2048;
+    lamp.shadow.mapSize.set(shadowSize, shadowSize);
     lamp.shadow.bias = -0.0005;
     scene.add(lamp, lamp.target);
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -87,6 +89,8 @@
       V.dealer.face(dealer.mesh, elev);
       // 直式螢幕是寬度先頂到：牌桌大小已經定了，上方多出來的高度讓荷官放大來撐
       dealer.mesh.scale.setScalar(aspect < 1 ? 2.2 : 1);
+      // 直式螢幕俯角大，立牌底邊會從桌子後面露出來，往前貼近桌邊才藏得住
+      dealer.mesh.position.z = aspect < 1 ? -0.4 : -0.6;
       scene.updateMatrixWorld();
       // 框景框牌桌加荷官，地板不算。直式螢幕是寬度先頂到，整張桌子框進來會太小，改成只框玩牌用得到的範圍、
       // 荷官只算立牌本身的四個角（它往後仰，外接盒會多出一大塊空的），桌子左右兩端超出畫面；
@@ -123,7 +127,7 @@
     }
 
     let chips = 0;
-    scene.traverse(o => { if (o.userData.kind === 'chip') chips++; });
+    scene.traverse(o => { if (o.userData.kind === 'chip') chips += o.userData.count || 1; });
     status.scene = { seats: T.seats.length, chips, fit: false };
     layout();
     director = V.director.create({ scene, table: T, dealer, project, render, hud });
