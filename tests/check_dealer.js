@@ -80,17 +80,19 @@ test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的�
   }
 });
 
-// 發牌時右手舉起來捏著牌，原本垂著的右袖就不能再畫（使用者 2026-10-22 回報「多了一隻手臂」）。
-// 把每種表情的 SVG 畫到畫布上，讀兩個點的不透明度（SVG 座標）：左袖垂下處五種都要有東西，右袖垂下處只有發牌時是空的
+// 舉起來的那隻手，原本垂著的袖子就不能再畫（使用者 2026-10-22 回報「多了一隻手臂」）。
+// 把每種表情的 SVG 畫到畫布上，讀兩個點的不透明度（SVG 座標）：兩邊垂袖處，舉手那一側要空、另一側要有東西；再數一次手臂有幾組
+const RAISED = { idle: 'left', deal: 'right', surprised: 'left', smile: 'right', sorry: 'right' };
 const ARMS = `(async () => {
   await BJK.view.stage.dealer.ready;
   const read = mood => new Promise((ok, fail) => {
     const img = new Image();
     img.onload = () => {
-      const c = document.createElement('canvas'); c.width = 400; c.height = 520;
-      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 400, 520);
+      const c = document.createElement('canvas'); c.width = 560; c.height = 520;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 560, 520);
       const alpha = (x, y) => ctx.getImageData(x, y, 1, 1).data[3];
-      ok({ left: alpha(86, 490), right: alpha(314, 490) });
+      const doc = new DOMParser().parseFromString(BJK.view.dealer.svg(mood), 'image/svg+xml');
+      ok({ left: alpha(118, 490), right: alpha(446, 490), arms: doc.querySelectorAll('g.arm').length });
     };
     img.onerror = () => fail(new Error(mood + ' 的 SVG 載不起來'));
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(BJK.view.dealer.svg(mood));
@@ -110,21 +112,45 @@ async function measureArms(appDir) {
 
 function assertTwoArms(arms) {
   const why = JSON.stringify(arms);
+  assert.deepStrictEqual(Object.keys(arms).sort(), Object.keys(RAISED).sort(), `表情清單跟 RAISED 對不上：${why}`);
   for (const [mood, a] of Object.entries(arms)) {
-    assert.strictEqual(a.left, 255, `${mood}：左袖不見了（量法可能讀錯）：${why}`);
-    assert.strictEqual(a.right, mood === 'deal' ? 0 : 255, mood === 'deal' ? `發牌時右袖還垂著，多一隻手：${why}` : `${mood}：右袖不見了：${why}`);
+    for (const side of ['left', 'right']) {
+      if (side === RAISED[mood]) assert.strictEqual(a[side], 0, `${mood}：${side} 手舉起來了袖子還垂著，多一隻手：${why}`);
+      else assert.strictEqual(a[side], 255, `${mood}：${side} 袖不見了（量法可能讀錯）：${why}`);
+    }
+    assert.strictEqual(a.arms, 2, `${mood}：畫了 ${a.arms} 組手臂：${why}`);
   }
 }
 
-test(`${availableBrowsers()[0]}：五種表情都只有兩隻手，發牌時舉起來的右手不再另外垂一隻袖子`, async () => {
+test(`${availableBrowsers()[0]}：五種表情都只有兩隻手，舉起來的那隻手不再另外垂一隻袖子`, async () => {
   assertTwoArms(await measureArms(APP));
 });
 
-test('陽性對照：發牌時照樣畫垂著的右袖，要判成多一隻手', async () => {
-  const tmp = brokenCopy([[DEALER_JS, "${mood === 'deal' ? '' : RIGHT_SLEEVE}", '${RIGHT_SLEEVE}']]);
+test('陽性對照：舉手時照樣畫垂著的袖子（不算手臂組數），要判成多一隻手', async () => {
+  const tmp = brokenCopy([[DEALER_JS, '${left()}${right()}', `\${left()}\${right()}\${ARM_R.hang().replace('class="arm"', '')}`]]);
   try {
     const arms = await measureArms(tmp);
     assert.throws(() => assertTwoArms(arms), /多一隻手/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：多畫一隻舉起來的手（垂袖處看不出來），要判成手臂組數不對', async () => {
+  const tmp = brokenCopy([[DEALER_JS, '${left()}${right()}', '${left()}${right()}${ARM_R.brow()}']]);
+  try {
+    const arms = await measureArms(tmp);
+    assert.throws(() => assertTwoArms(arms), /畫了 3 組手臂/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：垂著的袖子不畫，要判成袖子不見了', async () => {
+  const tmp = brokenCopy([[DEALER_JS, 'hang: () => arm([[146, 356], [122, 446], [112, 620]]),', 'hang: () => arm([[146, 356], [122, 400], [112, 420]]),']]);
+  try {
+    const arms = await measureArms(tmp);
+    assert.throws(() => assertTwoArms(arms), /袖不見了/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

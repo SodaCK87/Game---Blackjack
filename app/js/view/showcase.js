@@ -15,7 +15,7 @@
 
   // 荷官的臉直接拿 dealer.js 畫立牌的那張 SVG，只裁到頭肩，表情跟桌上一模一樣。
   // 直接嵌進頁面、不轉成圖檔：探針才量得到五官（g.face）實際畫在畫面哪裡
-  const faceSvg = mood => V.dealer.svg(mood, '70 51 260 260');
+  const faceSvg = mood => V.dealer.svg(mood, '146 28 290 290');
 
   // 尺寸多夾一個 vh：橫拿的手機（844×390）照原型的大小，副標會掉出畫面底下。桌機 1280×720 與直式 390×844 算出來跟原型一樣
   const FACE = 'min(58vmin, 380px, 53vh)', TITLE = 'clamp(52px, min(14vw, 21vh), 150px)', TITLE2 = 'clamp(56px, min(15vw, 21vh), 150px)';
