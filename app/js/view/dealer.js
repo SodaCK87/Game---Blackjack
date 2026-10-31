@@ -7,6 +7,7 @@
   const H = 3.4, W = H * VB_W / VB_H;    // 立牌在場景裡的大小
   // 臉部外框（含頭髮），給對白泡泡避開用
   const HEAD = { cx: 282, cy: 172, rx: 92, ry: 116 };
+  const ASIDE_MS = 1600;                 // 換造型那句話講多久
 
   // JOJO 動畫的硬光：只有亮面、紫紅暗面、墨黑三階，不用漸層；光從左上來，臉朝畫面右側，所以遠側半張臉整片落進暗面
   const C = {
@@ -218,9 +219,8 @@
     <path d="${GO}" stroke="${C.ink}" stroke-width="27" transform="translate(5 6)"/><path d="${GO}" stroke="${C.goldHi}" stroke-width="27"/><path d="${GO}" stroke="${C.vest}" stroke-width="18"/></g>`;
   const MENACE = { surprised: go(26, 64, 0.62, -8) + go(62, 150, 0.5, -4) + go(30, 226, 0.4, 6), smile: go(24, 96, 0.62, 8) + go(60, 182, 0.5, -6) + go(28, 250, 0.4, -10) };
 
-  // crop 給了就只畫那一塊、大小跟著外框（showcase.js 的荷官大特寫）。五官包在 g.face 裡，探針量它畫在畫面哪裡
-  function svg(mood, crop) {
-    const size = crop ? `width="100%" height="100%" viewBox="${crop}"` : `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="0 0 ${VB_W} ${VB_H}"`;
+  // size 是 <svg> 的大小與 viewBox，由下面的 svg() 依造型決定。五官包在 g.face 裡，探針量它畫在畫面哪裡
+  function draw(mood, size) {
     const [left, right] = POSE[mood];
     return `<svg xmlns="http://www.w3.org/2000/svg" ${size}>
       ${DEFS}${MENACE[mood] || ''}${COLLAR_BACK}${NECK}${CHEST}${JACKET}${CHAIN}${CHOKER}${COLLAR_FRONT}
@@ -228,7 +228,24 @@
     </svg>`;
   }
 
-  function loadTexture(mood) {
+  // 造型：點荷官時依序循環。立牌大小都一樣，換造型只換貼圖。head 是臉部外框（立牌座標）、crop 是大特寫的裁切、line 是換上時講的話
+  if (!V.dealerClassic) throw new Error('載入順序錯：dealer_classic.js 要排在 dealer.js 之前');
+  const LOOKS = {
+    jojo: { viewBox: `0 0 ${VB_W} ${VB_H}`, head: HEAD, crop: '146 28 290 290', draw, line: '這身才夠氣勢。' },
+    classic: V.dealerClassic,
+  };
+  const LOOK_NAMES = Object.keys(LOOKS);
+  let look = LOOK_NAMES[0];   // 整頁只有一位荷官，大特寫也讀這個
+
+  // crop 給了就只畫那一塊、大小跟著外框
+  function svg(mood, crop, name = look) {
+    const L = LOOKS[name];
+    return L.draw(mood, crop ? `width="100%" height="100%" viewBox="${crop}"` : `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="${L.viewBox}"`);
+  }
+  // showcase.js 的荷官大特寫：跟著目前的造型
+  const portrait = mood => svg(mood, LOOKS[look].crop);
+
+  function loadTexture(mood, name) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -239,9 +256,10 @@
         resolve(tex);
       };
       img.onerror = () => reject(new Error(`荷官表情「${MOODS[mood]}」的圖載不進來`));
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(mood));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(mood, null, name));
     });
   }
+  const loadLook = name => Promise.all(Object.keys(MOODS).map(m => loadTexture(m, name).then(t => [m, t]))).then(Object.fromEntries);
 
   // SVG 座標 → 立牌本地座標（原點在立牌底邊中央）
   function local(sx, sy) {
@@ -256,17 +274,62 @@
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.renderOrder = 1;
-    const textures = {};
+    let textures = {};
+    let masks = {};
     let mood = 'idle';
-    let hideTimer = null;
+    let hideTimer = null, asideTimer = null, beforeAside = null;
+    let switching = false;
 
-    const ready = Promise.all(Object.keys(MOODS).map(m => loadTexture(m).then(t => { textures[m] = t; })))
-      .then(() => {
+    const saved = V.hud.loadPrefs().look;
+    look = LOOK_NAMES.includes(saved) ? saved : LOOK_NAMES[0];
+    const ready = loadLook(look)
+      .then(set => {
+        textures = set;
         material.map = textures[mood];
         material.visible = true;
         material.needsUpdate = true;
         onChange();
       });
+
+    // 新的五張全載好才換，換完放掉舊的：貼圖一直只有一套，點再多次記憶體也不會疊上去
+    function nextLook() {
+      if (switching) return Promise.resolve(false);
+      switching = true;
+      const name = LOOK_NAMES[(LOOK_NAMES.indexOf(look) + 1) % LOOK_NAMES.length];
+      return loadLook(name).then(set => {
+        Object.values(textures).forEach(t => t.dispose());
+        textures = set;
+        masks = {};
+        look = name;
+        material.map = textures[mood];
+        V.hud.savePref('look', name);
+        aside(LOOKS[name].line);
+        onChange();
+        return true;
+      }).catch(e => {
+        console.warn(e.message);
+        return false;
+      }).finally(() => { switching = false; });
+    }
+
+    // uv 落在人身上，還是立牌透明的地方（透明度從貼圖縮成的小遮罩讀）
+    function opaque(uv) {
+      if (!textures[mood]) return false;
+      const w = 140, h = 130, x = Math.floor(uv.x * w), y = Math.floor((1 - uv.y) * h);
+      try {
+        if (!masks[mood]) {
+          const c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(textures[mood].image, 0, 0, w, h);
+          masks[mood] = ctx.getImageData(0, 0, w, h).data;
+        }
+        return masks[mood][(y * w + x) * 4 + 3] > 40;
+      } catch (e) {
+        return true;   // 有些瀏覽器不准讀 SVG 畫出來的圖：寧可點透明處也換，不要點到人沒反應
+      }
+    }
 
     function setMood(next) {
       if (!MOODS[next]) throw new Error(`沒有這種表情：${next}`);
@@ -283,9 +346,10 @@
     }
 
     function faceRect() {
+      const { cx, cy, rx, ry } = LOOKS[look].head;
       const corners = [
-        toScreen(HEAD.cx - HEAD.rx, HEAD.cy - HEAD.ry - 20), toScreen(HEAD.cx + HEAD.rx, HEAD.cy - HEAD.ry - 20),
-        toScreen(HEAD.cx - HEAD.rx, HEAD.cy + HEAD.ry), toScreen(HEAD.cx + HEAD.rx, HEAD.cy + HEAD.ry),
+        toScreen(cx - rx, cy - ry - 20), toScreen(cx + rx, cy - ry - 20),
+        toScreen(cx - rx, cy + ry), toScreen(cx + rx, cy + ry),
       ];
       const xs = corners.map(p => p.x), ys = corners.map(p => p.y);
       return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
@@ -312,21 +376,42 @@
       bubble.style.top = `${clamp(top, 8, vh - h - 8)}px`;
     }
 
-    function say(text, ms) {
-      clearTimeout(hideTimer);
+    function show(text) {
       bubble.textContent = text;
       bubble.hidden = false;
       placeBubble();
+    }
+
+    function say(text, ms) {
+      clearTimeout(hideTimer);
+      clearTimeout(asideTimer);
+      asideTimer = null;
+      show(text);
       if (ms) hideTimer = setTimeout(hush, ms);
     }
 
     function hush() {
       clearTimeout(hideTimer);
+      clearTimeout(asideTimer);
+      asideTimer = null;
       bubble.hidden = true;
     }
 
+    // 插一句話，講完放回原本那句：輪到你時的提示不能被換造型蓋掉。中途牌局往下走（say）就不放回去
+    function aside(text) {
+      if (!asideTimer) beforeAside = bubble.hidden ? null : bubble.textContent;
+      clearTimeout(asideTimer);
+      show(text);
+      asideTimer = setTimeout(() => {
+        asideTimer = null;
+        if (beforeAside === null) bubble.hidden = true;
+        else show(beforeAside);
+      }, ASIDE_MS);
+    }
+
     return {
-      mesh, ready, setMood, say, hush, placeBubble, faceRect,
+      mesh, ready, setMood, say, hush, placeBubble, faceRect, nextLook, opaque,
+      get look() { return look; },
       get mood() { return mood; },
       get loaded() { return Object.keys(textures).length; },
     };
@@ -337,5 +422,5 @@
     mesh.rotation.set(-elevation, 0, 0);
   }
 
-  V.dealer = { MOODS, W, H, create, face, svg };
+  V.dealer = { MOODS, W, H, ASIDE_MS, create, face, svg, portrait };
 })();

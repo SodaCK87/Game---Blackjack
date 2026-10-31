@@ -135,6 +135,23 @@
     V.stage = { scene, camera, renderer, table: T, room, dealer, render, director };
     window.addEventListener('resize', layout);
     layout();
+    // 點荷官換造型：鏡頭射線打到立牌、那一點不透明、前面沒有牌桌或籌碼架擋著，才算點到他
+    const ray = new THREE.Raycaster(), pointer = new THREE.Vector2();
+    function onDealer(e) {
+      const r = canvas.getBoundingClientRect();
+      pointer.set((e.clientX - r.left) / r.width * 2 - 1, 1 - (e.clientY - r.top) / r.height * 2);
+      ray.setFromCamera(pointer, camera);
+      const hit = ray.intersectObject(dealer.mesh)[0];
+      if (!hit || !dealer.opaque(hit.uv)) return false;
+      const front = ray.intersectObject(T.group, true)[0];
+      return !front || front.distance > hit.distance;
+    }
+    canvas.addEventListener('click', e => {
+      if (!document.querySelector('.bigfx') && onDealer(e)) dealer.nextLook();
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType === 'mouse') canvas.style.cursor = onDealer(e) ? 'pointer' : '';
+    });
     // 雙指放大時瀏覽器只是把畫布這張點陣圖拉大，牌就糊了（疊在上面的 HTML 字不會）。手勢停下來後照倍數重畫一張，
     // 縮回去換回原本的解析度：沒放大時一格的成本不變，也不必開迴圈。解析度是整張畫布一起提高的，總像素要壓住
     const MAX_ZOOM_PIXELS = 5e6;

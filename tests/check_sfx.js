@@ -158,7 +158,7 @@ test(`${first()}：左上角關掉音效就不出聲；重新整理後還是關�
 });
 
 test('陽性對照：存偏好時不保留另一個開關，要判成重新整理後音效又開了', async () => {
-  const tmp = copyWith(path.join('js', 'view', 'hud.js'), 'JSON.stringify(Object.assign(loadPrefs(), { [name]: on }))', 'JSON.stringify({ [name]: on })');
+  const tmp = copyWith(path.join('js', 'view', 'hud.js'), 'JSON.stringify(Object.assign(loadPrefs(), { [name]: value }))', 'JSON.stringify({ [name]: value })');
   try {
     const r = await toggleRun(tmp);
     assert.strictEqual(r.value.reloaded.sound, 'true', JSON.stringify(r.value));

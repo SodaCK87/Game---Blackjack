@@ -2,8 +2,8 @@
 (function () {
   const V = window.BJK.view;
 
-  // 勝率提示與音效開或關，記在瀏覽器裡（跟籌碼存檔分開放：清掉偏好不該動到籌碼）。
-  // 兩個開關存在同一筆，寫一個時要保留另一個；沒存過的欄位當成開
+  // 勝率提示與音效開或關、荷官的造型，記在瀏覽器裡（跟籌碼存檔分開放：清掉偏好不該動到籌碼）。
+  // 全部存在同一筆，寫一個時要保留其他的；沒存過的開關當成開
   const PREFS_KEY = 'bjk.prefs.v1';
   function loadPrefs() {
     try {
@@ -14,8 +14,8 @@
     }
   }
   const prefOn = name => loadPrefs()[name] !== false;
-  function savePref(name, on) {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(loadPrefs(), { [name]: on }))); } catch (e) { /* 存不了就只在這一場有效 */ }
+  function savePref(name, value) {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(loadPrefs(), { [name]: value }))); } catch (e) { /* 存不了就只在這一場有效 */ }
   }
   const pct = x => `${Math.round(x * 100)}%`;
 
@@ -127,5 +127,5 @@
     };
   }
 
-  V.hud = { create };
+  V.hud = { create, loadPrefs, savePref };
 })();

@@ -2,13 +2,15 @@
 // 用法：node tools/shoot.js [檔名前綴]           桌機 1280×720 與手機 390×844 各一張
 //       node tools/shoot.js [檔名前綴] --dealer  荷官五種表情各一張（桌機），外加手機一張
 //       node tools/shoot.js [檔名前綴] --round   照正常速度打一局，桌機與手機各截四個時間點
+//       以上都可以再加 --classic，改用舊版荷官造型
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('../tests/browser_util');
 
-const DESKTOP = { size: [1280, 720], mobile: false };
-const PHONE = { size: [390, 844], mobile: true };
+const init = process.argv.includes('--classic') ? `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');` : '';
+const DESKTOP = { size: [1280, 720], mobile: false, init };
+const PHONE = { size: [390, 844], mobile: true, init };
 const LINES = {
   idle: '歡迎光臨，請下注！',
   deal: '發牌囉。',

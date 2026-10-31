@@ -9,7 +9,7 @@
 3. `app\js\core\` 是純邏輯：不准引用 `app\js\view\`、不准碰 DOM／Three.js／計時器、不准直接呼叫 `Math.random`。亂數由呼叫端傳入，探針才重現得了同一副牌；動畫要等的東西一律在 view 層等。每支 core 檔的外殼照 `app\js\core\version.js`：瀏覽器掛到 `window.BJK.<名稱>`，node 走 `module.exports`；有依賴的照 `game.js`（node 走 `require`、瀏覽器走 `BJK.<名稱>`，缺了當場擲「載入順序錯」），`index.html` 照依賴順序排。`tests\check_core_purity.js` 守這一條。
 4. `app\` 一律 classic script，不准 `type="module"`、`import`／`export`。2026-10-22 實測 Edge 與 Chrome 在 file:// 下 ES module 被 CORS 擋（同一頁走 http 正常），同事雙擊會一片空白。Three.js 因此由 `npm run build:three` 打包成全域 `THREE` 的 `app\lib\three.js`，不准手改。
 5. 改動時只跑相關的測試檔（`node --test tests/check_<對象>.js`，再縮用 `--test-name-pattern`）；全套 `npm test`（＝`node --test "tests/check_*.js"`；node 24 的 `--test` 給目錄會失敗，要給 glob）約 4 分鐘，只在 push 前跑一次，README 的「自動檢查 N 項」等那次跑完再填。使用者 2026-10-28 嫌每次跑全套太久；CI 不開瀏覽器，push 前那次是唯一的全套。剛 clone 先 `npm ci`。會開無頭 Edge／Chrome，不搶焦點。
-   1. 看畫面用 `node tools/shoot.js <前綴>`，桌機 1280×720 與手機 390×844 各一張，落在 `tools\_shots\`；加 `--dealer` 改成荷官五種表情各一張，加 `--round` 改成照正常速度打一局、截下注／輪到你／結算／下一局四張。
+   1. 看畫面用 `node tools/shoot.js <前綴>`，桌機 1280×720 與手機 390×844 各一張，落在 `tools\_shots\`；加 `--dealer` 改成荷官五種表情各一張，加 `--round` 改成照正常速度打一局、截下注／輪到你／結算／下一局四張；再加 `--classic` 改用舊版荷官造型。
    2. 改了 core 的規則或它的測試之後跑 `npm run mutants`：先確認沒破壞的基準全綠，再在暫存複本植入 63 種錯誤，每一種都要有具名的測試變紅（不在 `npm test` 裡）。新增規則時也往 `tests\mutants.js` 的表加一列。
    3. 模擬手機尺寸一律走 `tests\browser_util.js` 的 CDP，不要用 `--window-size`：無頭視窗寬度最小被夾在約 500px，要 390 實得 496，截圖只截到左半邊而判準照樣綠。
    4. 推上 main 後 GitHub Actions 會自動發布到 Pages（CI 只跑不開瀏覽器的測試）；workflow 跑完再跑 `node tools/check_live.js`，在線上網址桌機與手機各打兩局、確認線上版本等於本機 `BJK_VER`。
