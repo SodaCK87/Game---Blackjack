@@ -74,6 +74,7 @@
       step: BJK.game.DEFAULTS.step,
       onDeal: bet => director.runRound(bet),
       onReset: () => director.resetBankroll(),
+      getStats: () => director && director.stats,
     });
 
     function layout() {

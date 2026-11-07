@@ -71,6 +71,16 @@
     }
   }
 
+  // 戰績另存一筆，跟籌碼存檔分開：格式改了只換這個 key，不會連籌碼一起被當成新玩家
+  const STATS_KEY = 'bjk.stats.v1';
+  function loadStats(bankroll) {
+    try {
+      return BJK.stats.parse(JSON.parse(localStorage.getItem(STATS_KEY)), bankroll);
+    } catch (e) {
+      return BJK.stats.empty(bankroll);
+    }
+  }
+
   function create({ scene, table: T, dealer, project, render, hud }) {
     // 少了 showcase.js 要在開頁就說，不要等到第一次 Blackjack 才卡住
     if (!FX.showcase || !FX.doubleDown) throw new Error('載入順序錯：showcase.js 要排在 director.js 之前');
@@ -81,7 +91,10 @@
       rng,
       seats: SEATS.map(s => ({ id: s.id, name: s.name, personality: s.personality, bankroll: s.id in saved ? saved[s.id] : START })),
     });
+    if (!BJK.stats) throw new Error('載入順序錯：core/stats.js 要排在 director.js 之前');
+    let stats = loadStats(game.state().seats.find(s => s.id === 'me').bankroll);
     function save() {
+      try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) { /* 同下 */ }
       try {
         const bankrolls = Object.fromEntries(game.state().seats.map(s => [s.id, s.bankroll]));
         localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, bankrolls }));
@@ -612,7 +625,9 @@
         if (s.personality) bets[s.id] = BJK.strategy.bet(s.personality, s.bankroll, rng, rules);
       }
       say('deal', '下注結束，發牌！');
-      await play(game.startRound(bets));
+      const roundEvents = [];
+      const step = events => { roundEvents.push(...events); return play(events); };
+      await step(game.startRound(bets));
       while (game.state().phase === 'player') {
         const id = game.state().turn;
         let action;
@@ -622,13 +637,17 @@
           action = await hud.nextAction();
           hud.showOdds(null);
           hud.mode('busy');
+          // 自己的牌與荷官明牌本來就看得到，拿來對基本策略不會洩漏底牌
+          const st = game.state(), mine = st.seats.find(s => s.id === 'me').hands[st.turnHand].cards;
+          stats = BJK.stats.decide(stats, action === BJK.strategy.basic(mine, st.dealer.cards[0], game.legal('me')));
         } else {
           await A.wait(id === 'me' ? 200 : 600);
           action = game.aiChoice(id);
         }
-        await play(game.act(id, action));
+        await step(game.act(id, action));
       }
-      if (game.state().phase === 'dealer') await play(game.finishRound());
+      if (game.state().phase === 'dealer') await step(game.finishRound());
+      stats = BJK.stats.record(stats, roundEvents, { seat: 'me', bankroll: game.state().seats.find(s => s.id === 'me').bankroll });
       roundsPlayed++;
       enterBetting();
     }
@@ -687,6 +706,7 @@
       get lastOdds() { return lastOdds; },
       get rounds() { return roundsPlayed; },
       get splits() { return splits; },
+      get stats() { return stats; },
     };
   }
 

@@ -77,6 +77,14 @@ const MUTANTS = [
   ['分後 Blackjack 在勝率裡只賠 1 倍', 'app/js/core/odds.js', 'ev: 1.5 * (1 - bj), bj: true', 'ev: 1 - bj, bj: true', 'tests/check_odds.js'],
   // ---- 2026-10-28 state() 改成逐層拷貝（P-11）----
   ['state() 給出引擎裡的牌物件（沒拷貝，改回傳值就改到牌局）', 'app/js/core/game.js', 'const copyCard = c => c && { ...c };', 'const copyCard = c => c;', 'tests/check_game.js'],
+  // ---- v0.18.0 戰績 ----
+  ['戰績：Blackjack 沒算贏一手', 'app/js/core/stats.js', "if (e.result === 'win' || e.result === 'blackjack') s.wins++;", "if (e.result === 'win') s.wins++;", 'tests/check_stats.js'],
+  ['戰績：平手把連勝歸零', 'app/js/core/stats.js', 'else if (net < 0) s.streak = 0;', 'else s.streak = 0;', 'tests/check_stats.js'],
+  ['戰績：別的座位的結算也算進玩家', 'app/js/core/stats.js', 'if (e.seat !== seat) continue;', '', 'tests/check_stats.js'],
+  ['戰績：沒有結算的事件也算一局', 'app/js/core/stats.js', 'if (!settled) return stats;', '', 'tests/check_stats.js'],
+  ['戰績：籌碼最高點沒跟著更新', 'app/js/core/stats.js', 's.peak = Math.max(s.peak, bankroll);', 's.peak = s.peak;', 'tests/check_stats.js'],
+  ['戰績存檔：數字互相矛盾照收', 'app/js/core/stats.js', 'if (raw.basic > raw.decisions || raw.wins + raw.losses + raw.pushes !== raw.hands || raw.streak > raw.bestStreak) return empty(bankroll);', '', 'tests/check_stats.js'],
+  ['戰績存檔：淨輸贏是負的就當壞檔', 'app/js/core/stats.js', "if (!Number.isInteger(n) || (f !== 'net' && n < 0)) return empty(bankroll);", 'if (!Number.isInteger(n) || n < 0) return empty(bankroll);', 'tests/check_stats.js'],
 ];
 
 // 失敗清單裡「有名字的」那幾條：載入就擲錯時 node 記的是以檔名命名的一條（tests\check_x.js），不算

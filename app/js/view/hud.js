@@ -19,11 +19,47 @@
   }
   const pct = x => `${Math.round(x * 100)}%`;
 
-  function create({ minBet, maxBet, step, onDeal, onReset }) {
+  // 戰績面板的每一列：[標題, 內容]。數字照籌碼的寫法加千分位
+  function statsRows(s) {
+    const n = x => x.toLocaleString();
+    const rate = BJK.stats.basicRate(s);
+    return [
+      ['打了', `${n(s.rounds)} 局`],
+      ['贏／輸／平', `${n(s.wins)}／${n(s.losses)}／${n(s.pushes)} 手`],
+      ['Blackjack', `${n(s.blackjacks)} 次`],
+      ['爆牌', `${n(s.busts)} 次`],
+      ['加倍／分牌', `${n(s.doubles)}／${n(s.splits)} 次`],
+      ['最長連勝', `${n(s.bestStreak)} 局（目前 ${n(s.streak)} 局）`],
+      ['籌碼最高', n(s.peak)],
+      ['累計輸贏', s.net > 0 ? `+${n(s.net)}` : n(s.net)],
+      ['照基本策略打', rate === null ? '還沒輪到你做決定' : `${rate}%（${n(s.decisions)} 次決定）`],
+    ];
+  }
+
+  function create({ minBet, maxBet, step, onDeal, onReset, getStats }) {
     if (!V.sfx) throw new Error('載入順序錯：sfx.js 要排在 hud.js 之前');
     const $ = id => document.getElementById(id);
     const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
     $('resetBtn').addEventListener('click', () => onReset());
+
+    // 戰績：點左上第二顆鈕打開，關閉鈕、Esc、點面板外面都會關
+    function openStats() {
+      const s = getStats && getStats();
+      if (!s) return;
+      $('statsList').replaceChildren(...statsRows(s).flatMap(([k, v]) => [
+        Object.assign(document.createElement('dt'), { textContent: k }),
+        Object.assign(document.createElement('dd'), { textContent: v }),
+      ]));
+      $('statsPanel').hidden = false;
+      $('statsClose').focus();
+    }
+    const closeStats = () => { $('statsPanel').hidden = true; };
+    $('statsBtn').addEventListener('click', () => ($('statsPanel').hidden ? openStats() : closeStats()));
+    $('statsClose').addEventListener('click', closeStats);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeStats(); });
+    document.addEventListener('pointerdown', e => {
+      if (!$('statsPanel').hidden && !$('statsPanel').contains(e.target) && !$('statsBtn').contains(e.target)) closeStats();
+    });
 
     let soundOn = prefOn('sound');
     function applySound() {
