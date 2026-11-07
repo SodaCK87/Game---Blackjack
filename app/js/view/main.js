@@ -72,7 +72,8 @@
       minBet: BJK.game.DEFAULTS.minBet,
       maxBet: BJK.game.DEFAULTS.maxBet,
       step: BJK.game.DEFAULTS.step,
-      onDeal: bet => director.runRound(bet),
+      // 不接住的話引擎停在半局、操作列停在 busy，同事只看到畫面不動（BJK-10）
+      onDeal: bet => director.runRound(bet).catch(e => showFatal(e.message, true)),
       onReset: () => director.resetBankroll(),
       getStats: () => director && director.stats,
     });
@@ -190,13 +191,17 @@
   const failed = [status.core, status.render].find(s => s !== 'ok');
   if (failed) showFatal(failed.replace(/^fail: /, ''));
 
-  function showFatal(detail) {
-    console.error('21 點載不起來：' + detail);
+  // midRound：牌局打到一半擲錯。存檔只在回到下注時寫，所以重新整理會回到這一局開始前的籌碼
+  function showFatal(detail, midRound) {
+    const what = midRound ? '這一局出錯了' : '這台電腦載不起來 21 點';
+    console.error(`21 點${midRound ? '牌局出錯' : '載不起來'}：` + detail);
     const line = (tag, text) => { const el = document.createElement(tag); el.textContent = text; return el; };
     const box = document.getElementById('fatal');
     box.replaceChildren(
-      line('p', `這台電腦載不起來 21 點（${ver ? 'v' + ver : '版本不明'}）。`),
-      line('p', '先重新整理一次；還是不行，請截下這個畫面，傳給分享網址給你的同事。'),
+      line('p', `${what}（${ver ? 'v' + ver : '版本不明'}）。`),
+      line('p', midRound
+        ? '請重新整理，這一局不算，籌碼會回到這一局開始前。還是不行，請截下這個畫面，傳給分享網址給你的同事。'
+        : '先重新整理一次；還是不行，請截下這個畫面，傳給分享網址給你的同事。'),
       line('small', `原因：${detail}`));
     box.hidden = false;
     document.body.dataset.fatal = '1';

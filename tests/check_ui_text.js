@@ -1,4 +1,4 @@
-// 守畫面上的字：勝率提示只用翻開的牌、疊在一起的標籤會讓位、角落的版本號與載不起來的說明（BJK-03）、
+// 守畫面上的字：勝率提示只用翻開的牌、疊在一起的標籤會讓位、角落的版本號與載不起來的說明（BJK-03）、牌局中途出錯的說明（BJK-10）、
 // 大特效的大字不蓋臉（BJK-04）、分 A 兩手 Blackjack 只播一次（BJK-05）、荷官的表情與籌碼數字跟著結算動畫走。
 // 驗不到：真手機、字好不好讀（對比）。
 const test = require('node:test');
@@ -199,6 +199,41 @@ function assertFatal(m, why) {
   assert.strictEqual(m.hud, 'none', `載不起來時操作列還在，同事會以為按了會動：${why}`);
 }
 
+// BJK-10：讓引擎在發完牌之後擲錯（同桌或你出手、荷官收尾都會撞到），照同事按法押 100 發牌；
+// 輪到你就按停牌，讓錯誤一定發生在半局。荷官開局就 Blackjack 那局不會出手，就再發一局
+const MID_ROUND = `(async () => {
+  await BJK.view.stage.dealer.ready; BJK.view.anim.speed = 40;
+  const $ = id => document.getElementById(id), hud = $('hud'), g = BJK.view.stage.director.game;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  for (const k of ['act', 'finishRound']) g[k] = () => { throw new Error('探針植入的牌局錯誤'); };
+  // 卡在 busy 就是沒接住（陽性對照走這條），不再發下一局
+  for (let i = 0; i < 5 && $('fatal').hidden && hud.dataset.mode === 'bet'; i++) {
+    $('clearBet').click(); document.querySelector('[data-chip="100"]').click(); $('dealBtn').click();
+    for (let t = 0; t < 8000 && $('fatal').hidden && hud.dataset.mode !== 'bet'; t += 50) {
+      if (hud.dataset.mode === 'act') $('standBtn').click();
+      await sleep(50);
+    }
+  }
+  return { fatal: !$('fatal').hidden, text: document.body.innerText, hud: getComputedStyle(hud).display,
+           onTable: g.state().phase !== 'idle' };
+})()`;
+const BANK_AFTER_RELOAD = `(async () => { await BJK.view.stage.dealer.ready;
+  return BJK.view.stage.director.game.state().seats.find(s => s.id === 'me').bankroll; })()`;
+const midRoundOf = (browser, dir) => withPage(browser, PHONE, async page => {
+  await page.goto(url(dir));
+  const during = await page.evaluate(MID_ROUND, 90000);
+  await page.goto(url(dir));
+  return { ...during, bankAfterReload: await page.evaluate(BANK_AFTER_RELOAD) };
+});
+function assertMidRound(m) {
+  const why = JSON.stringify(m);
+  assert.ok(m.onTable, `錯誤沒有發生在半局，這條量不到 BJK-10：${why}`);
+  assert.ok(m.fatal && m.text.includes('這一局出錯了') && m.text.includes(`v${BJK_VER}`), `半局擲錯時畫面沒說明或沒帶版本號：${why}`);
+  assert.match(m.text, /探針植入的牌局錯誤/, `畫面沒附原因：${why}`);
+  assert.strictEqual(m.hud, 'none', `出錯後操作列還在，同事會以為按了會動：${why}`);
+  assert.strictEqual(m.bankAfterReload, 1000, `畫面說籌碼會回到開局前，重新整理後卻是 ${m.bankAfterReload}：${why}`);
+}
+
 for (const browser of availableBrowsers()) {
   test(`${browser}：桌機與手機的畫面角落都看得到版本號，正常載入時不出現「載不起來」`, async () => {
     for (const vp of [DESKTOP, PHONE]) {
@@ -215,6 +250,13 @@ for (const browser of availableBrowsers()) {
     assertFatal(r.value, r.value.text);
     assert.match(r.value.text, /WebGL/);
     assert.ok(r.console.some(l => l.includes('載不起來')), `主控台沒記：${JSON.stringify(r.console)}`);
+  });
+
+  test(`${browser}：牌局中途擲錯時畫面說這一局出錯，重新整理籌碼回到開局前（BJK-10）`, async () => {
+    const r = await midRoundOf(browser, APP);
+    assertMidRound(r.value);
+    assert.ok(r.console.some(l => l.includes('牌局出錯')), `主控台沒記：${JSON.stringify(r.console)}`);
+    assert.ok(!r.console.some(l => /Uncaught/.test(l)), `錯誤沒被接住：${JSON.stringify(r.console)}`);
   });
 
   test(`${browser}：少一支 view 的檔時，手機畫面說載不起來、帶版本號（BJK-03）`, async () => {
@@ -246,6 +288,17 @@ test('陽性對照：拿掉顯示訊息那段，沒有 WebGL 與少一支檔都�
     fs.rmSync(path.join(tmp, DROPPED));
     const dropped = await screenOf(first(), PHONE, tmp);
     assert.throws(() => assertFatal(dropped.value, dropped.value.text), /載不起來/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：發牌不接住牌局的錯誤，要判成畫面沒說明（BJK-10）', async () => {
+  const tmp = copyWith(path.join('js', 'view', 'main.js'), '.catch(e => showFatal(e.message, true))', '');
+  try {
+    const r = await midRoundOf(first(), tmp);
+    assert.ok(r.value.onTable, `破壞後錯誤沒發生在半局，對照不成立：${JSON.stringify(r.value)}`);
+    assert.throws(() => assertMidRound(r.value), /沒說明/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
