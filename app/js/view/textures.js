@@ -195,7 +195,36 @@
     const g = ctx.createLinearGradient(0, 0, CW, CH);
     g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.45, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(33,44,49,0.1)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, CW, CH);
+    // 紙的厚度：四邊往外一圈漸暗、內側一道亮線。牌每個座位轉的角度不同，亮線四邊都畫，不分哪邊朝燈
+    ctx.strokeStyle = 'rgba(33,44,49,0.22)'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.roundRect(0, 0, CW, CH, 22); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.32)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(6, 6, CW - 12, CH - 12, 17); ctx.stroke();
     ctx.restore();
+  }
+
+  // 牌與籌碼底下墊的軟影子：開頁畫一次，代替逐像素算的即時陰影。CARD_SHADOW 是影子比牌多出來的邊（牌寬的比例）
+  const CARD_SHADOW = 0.14;
+  function cardShadow() {
+    const pad = Math.round(CW * CARD_SHADOW), c = canvas(CW + 2 * pad, CH + 2 * pad), ctx = c.getContext('2d');
+    // 圖形畫在畫布外、只把模糊的影子偏移進來：shadowBlur 每台瀏覽器都有，ctx.filter 舊 Safari 沒有
+    // 圖形比牌大一圈 e：只照牌的大小畫，牌緣外的影子只剩兩三成，桌機斜看幾乎看不到（check_shadow.js 量到）
+    const e = Math.round(pad * 0.15);
+    ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = pad * 0.7; ctx.shadowOffsetX = 4000;
+    ctx.beginPath(); ctx.roundRect(pad - 4000 - e, pad - e, CW + 2 * e, CH + 2 * e, 22 + e);
+    ctx.fillStyle = '#000'; ctx.fill();
+    return toTexture(c);
+  }
+  // 籌碼的影子：半徑 1＝籌碼邊，外面再暈開 CHIP_SHADOW
+  const CHIP_SHADOW = 0.35;
+  function chipShadow() {
+    const S = 128, c = canvas(S, S), ctx = c.getContext('2d'), r = S / 2;
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    const edge = 1 / (1 + CHIP_SHADOW);
+    g.addColorStop(0, 'rgba(0,0,0,0.6)'); g.addColorStop(edge * 0.85, 'rgba(0,0,0,0.5)');
+    g.addColorStop(edge, 'rgba(0,0,0,0.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    return toTexture(c);
   }
 
   // ---- J、Q、K 的人物 ----
@@ -403,9 +432,13 @@
     ctx.fillStyle = V.CHIP_COLORS[value]; ctx.fillRect(0, 0, 256, 32);
     ctx.fillStyle = V.COLORS.cardFace;
     for (let i = 0; i < 8; i++) ctx.fillRect(i * 32 + 10, 0, 12, 32);
+    // 側面是圓弧倒角：上半迎光、下半背光（畫布第 0 列是籌碼的上緣）
+    const bevel = ctx.createLinearGradient(0, 4, 0, 28);
+    bevel.addColorStop(0, 'rgba(255,255,255,0.22)'); bevel.addColorStop(0.4, 'rgba(255,255,255,0)'); bevel.addColorStop(1, 'rgba(0,0,0,0.3)');
+    ctx.fillStyle = bevel; ctx.fillRect(0, 4, 256, 24);
     // 上下緣壓暗、內側一道亮線：疊起來一片一片分得開
     ctx.fillStyle = 'rgba(0,0,0,0.42)'; ctx.fillRect(0, 0, 256, 4); ctx.fillRect(0, 28, 256, 4);
-    ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(0, 4, 256, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(0, 4, 256, 2);
     return c;
   }
 
@@ -436,9 +469,12 @@
     ctx.fillStyle = ink;
     ctx.font = `bold ${value >= 1000 ? 54 : 66}px ${SERIF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(value), 128, 132, 132);
-    // 外緣一圈高光
-    ctx.beginPath(); ctx.arc(128, 128, 124, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(255,255,255,0.34)'; ctx.lineWidth = 3; ctx.stroke();
+    // 外緣倒角：往邊上先亮一圈、再壓暗收邊，頂面看起來是凸起的圓餅而不是一張貼紙
+    const rim = ctx.createRadialGradient(128, 128, 100, 128, 128, 128);
+    rim.addColorStop(0, 'rgba(255,255,255,0)'); rim.addColorStop(0.62, 'rgba(255,255,255,0.3)');
+    rim.addColorStop(0.8, 'rgba(255,255,255,0)'); rim.addColorStop(1, 'rgba(0,0,0,0.4)');
+    ctx.beginPath(); ctx.arc(128, 128, 128, 0, 2 * Math.PI);
+    ctx.fillStyle = rim; ctx.fill();
     return toTexture(c);
   }
 
@@ -628,6 +664,9 @@
   V.textures = {
     felt, paintHall,
     CHIP_ATLAS: { top: 256 / ATLAS_H, side: 32 / ATLAS_H },
+    CARD_SHADOW, CHIP_SHADOW,
+    cardShadow: () => cached('cardShadow', cardShadow),
+    chipShadow: () => cached('chipShadow', chipShadow),
     cardFace: (rank, suit) => cached(`face-${rank}${suit}`, () => cardFace(rank, suit)),
     cardBack: () => cached('back', cardBack),
     deckEdge: () => cached('deckEdge', deckEdge),

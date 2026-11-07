@@ -30,6 +30,15 @@
     return { x: (rng() - 0.5) * 0.02, y: H / 2 + i * H, z: (rng() - 0.5) * 0.02, rot: rng() * Math.PI * 2 };
   }
 
+  // 一疊底下墊一片畫好的軟影子（同 cards.js 的理由與著色器）。掛在最底那片籌碼上、不掛在整疊上：
+  // director 拿整疊的 children.length 當片數算高度
+  const shadowSize = 2 * R * (1 + V.textures.CHIP_SHADOW);
+  const shadowGeometry = new THREE.PlaneGeometry(shadowSize, shadowSize).rotateX(-Math.PI / 2);
+  const shadowMaterial = new THREE.MeshBasicMaterial({
+    map: V.textures.chipShadow(), transparent: true, depthWrite: false,
+    polygonOffset: true, polygonOffsetUnits: -4,
+  });
+
   // 大面額在下
   function stackOf(values, rng) {
     const group = new THREE.Group();
@@ -39,6 +48,12 @@
       chip.rotation.y = j.rot;
       group.add(chip);
     });
+    if (group.children.length) {
+      const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+      shadow.position.y = -H / 2 + 0.002;
+      shadow.userData.kind = 'shadow';
+      group.children[0].add(shadow);
+    }
     return group;
   }
 

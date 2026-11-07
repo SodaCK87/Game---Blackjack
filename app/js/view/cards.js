@@ -28,6 +28,18 @@
     return materials.get(key);
   }
 
+  // 軟影子貼片：燈幾乎在正上方，即時陰影全被牌自己蓋住，疊牌看不出上下層，所以底下墊一片畫好的模糊影子。
+  // 法線朝本地 +y、貼在牌底下：疊牌時落在下一張牌上；牌蓋著（rotation.z = π）時背面朝鏡頭被剔除，不會浮到牌背上面。
+  // 透明＋貼圖跟棄牌盒的玻璃同一支著色器，不多編譯。最底那張牌的影子離絨布只有一點五毫米，polygonOffset 讓它贏過絨布的深度；
+  // 只能用 units 不能用 factor：factor 跟著斜率放大，斜看時影子會穿到自己的牌面上，整張牌變灰（2026-11-07 截圖看到）
+  const PAD = W * V.textures.CARD_SHADOW;
+  const shadowGeometry = new THREE.PlaneGeometry(W + 2 * PAD, H + 2 * PAD).rotateX(-Math.PI / 2);
+  const shadowMaterial = new THREE.MeshBasicMaterial({
+    map: V.textures.cardShadow(), transparent: true, depthWrite: false,
+    polygonOffset: true, polygonOffsetUnits: -4,
+  });
+  const SHADOW_Y = -T / 2 - 0.0005;
+
   // 牌的上緣（畫布頂端）在本地 -z：rotation.y = 0 時，坐在 +z 的玩家看到的是正的
   function make(rank, suit, faceUp) {
     const face = cachedMaterial(`f-${rank}${suit}`, () => V.textures.cardFace(rank, suit));
@@ -38,6 +50,10 @@
     mesh.castShadow = true;
     mesh.customDepthMaterial = depth;
     mesh.userData = { kind: 'card', rank, suit, faceUp };
+    const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+    shadow.position.y = SHADOW_Y;
+    shadow.userData.kind = 'shadow';
+    mesh.add(shadow);
     return mesh;
   }
 
