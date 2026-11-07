@@ -1,4 +1,4 @@
-// 守荷官：對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊；五種表情都只有兩隻手（BJK-01）；點荷官換造型。
+// 守荷官：立牌與大特寫用烘焙過光影的圖、而且跟 SVG 畫法同步；對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊；五種表情都只有兩隻手（BJK-01）；點荷官換造型。
 // 驗不到：表情畫得好不好看（看 node tools/shoot.js <前綴> --dealer 的截圖）。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -352,3 +352,41 @@ test(`${availableBrowsers()[0]}：偏好裡的造型是壞值時當成預設，�
 // 往右出界被瀏覽器擋掉（position: fixed 的泡泡寬度是 auto，會自己縮窄換行）；
 // 往上出界要荷官的臉貼近畫面頂端，而實測 6 種尺寸（390×844 到 1280×720）臉的上緣最少還有 78px。
 // dealer.js 的夾回是保險，不是現在靠它撐著。
+
+// 烘焙圖（dealer_baked.js）是從 JOJO 的 SVG 算出來的：畫法改了沒重跑 tools/bake_dealer.js，桌上就會是舊的樣子
+const BAKED = `(() => {
+  const B = BJK.view.dealerBaked, D = BJK.view.dealer, d = BJK.view.stage.dealer;
+  const stale = Object.keys(D.MOODS).filter(m => B.hash(D.svg(m, null, 'jojo')) !== B.source[m]);
+  const portrait = new DOMParser().parseFromString(D.portrait('smile'), 'image/svg+xml');
+  return { stale, standee: d.mesh.material.map.image.src === B.images[d.mood],
+           portrait: portrait.querySelector('image') ? portrait.querySelector('image').getAttribute('href') === B.images.smile : false,
+           face: !!portrait.querySelector('g.face') };
+})()`;
+const readBaked = appDir => withPage(availableBrowsers()[0], DESKTOP, async page => {
+  await open(page, appDir);
+  return page.evaluate(BAKED);
+});
+
+test(`${availableBrowsers()[0]}：立牌與大特寫用烘焙圖，烘焙圖跟 SVG 畫法同步`, async () => {
+  const r = await readBaked(APP);
+  assert.deepStrictEqual(r.value, { stale: [], standee: true, portrait: true, face: true }, '畫法改過就重跑 node tools/bake_dealer.js');
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：改了 JOJO 外套的顏色沒重跑烘焙，要判成五張都過期', async () => {
+  const tmp = brokenCopy([[path.join('js', 'view', 'dealer.js'), "coat: '#008080'", "coat: '#008081'"]]);
+  try {
+    assert.deepStrictEqual((await readBaked(tmp)).value.stale, ['idle', 'deal', 'surprised', 'smile', 'sorry']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：立牌照舊用 SVG 當貼圖，要判成沒用烘焙圖', async () => {
+  const tmp = brokenCopy([[path.join('js', 'view', 'dealer.js'), 'img.src = baked ? baked[mood] :', 'img.src =']]);
+  try {
+    assert.strictEqual((await readBaked(tmp)).value.standee, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

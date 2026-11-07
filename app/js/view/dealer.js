@@ -230,8 +230,10 @@
 
   // 造型：點荷官時依序循環。立牌大小都一樣，換造型只換貼圖。head 是臉部外框（立牌座標）、crop 是大特寫的裁切、line 是換上時講的話
   if (!V.dealerClassic) throw new Error('載入順序錯：dealer_classic.js 要排在 dealer.js 之前');
+  if (!V.dealerBaked) throw new Error('載入順序錯：dealer_baked.js 要排在 dealer.js 之前');
+  // baked：tools/bake_dealer.js 從這裡的 SVG 烘焙出光影的點陣圖，貼圖用它；SVG 仍是畫法的正本
   const LOOKS = {
-    jojo: { viewBox: `0 0 ${VB_W} ${VB_H}`, head: HEAD, crop: '146 28 290 290', draw, line: '這身才夠氣勢。' },
+    jojo: { viewBox: `0 0 ${VB_W} ${VB_H}`, head: HEAD, crop: '146 28 290 290', draw, baked: V.dealerBaked.images, line: '這身才夠氣勢。' },
     classic: V.dealerClassic,
   };
   const LOOK_NAMES = Object.keys(LOOKS);
@@ -242,8 +244,14 @@
     const L = LOOKS[name];
     return L.draw(mood, crop ? `width="100%" height="100%" viewBox="${crop}"` : `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="${L.viewBox}"`);
   }
-  // showcase.js 的荷官大特寫：跟著目前的造型
-  const portrait = mood => svg(mood, LOOKS[look].crop);
+  // showcase.js 的荷官大特寫：跟著目前的造型。有烘焙圖就疊在向量圖上面、座標一樣，
+  // 看到的是烘焙版，底下的 g.face 留給探針量五官畫在哪
+  function portrait(mood) {
+    const L = LOOKS[look], s = svg(mood, L.crop);
+    if (!L.baked) return s;
+    const [, , w, h] = L.viewBox.split(' ');
+    return s.replace(/<\/svg>\s*$/, `<image href="${L.baked[mood]}" width="${w}" height="${h}"/></svg>`);
+  }
 
   function loadTexture(mood, name) {
     return new Promise((resolve, reject) => {
@@ -256,7 +264,8 @@
         resolve(tex);
       };
       img.onerror = () => reject(new Error(`荷官表情「${MOODS[mood]}」的圖載不進來`));
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(mood, null, name));
+      const baked = LOOKS[name].baked;
+      img.src = baked ? baked[mood] : 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(mood, null, name));
     });
   }
   const loadLook = name => Promise.all(Object.keys(MOODS).map(m => loadTexture(m, name).then(t => [m, t]))).then(Object.fromEntries);

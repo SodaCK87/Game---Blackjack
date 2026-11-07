@@ -11,8 +11,9 @@
 5. 改動時只跑相關的測試檔（`node --test tests/check_<對象>.js`，再縮用 `--test-name-pattern`）；全套 `npm test`（＝`node --test "tests/check_*.js"`；node 24 的 `--test` 給目錄會失敗，要給 glob）約 4 分鐘，只在 push 前跑一次，README 的「自動檢查 N 項」等那次跑完再填。使用者 2026-10-28 嫌每次跑全套太久；CI 不開瀏覽器，push 前那次是唯一的全套。剛 clone 先 `npm ci`。會開無頭 Edge／Chrome，不搶焦點。
    1. 看畫面用 `node tools/shoot.js <前綴>`，桌機 1280×720 與手機 390×844 各一張，落在 `tools\_shots\`；加 `--dealer` 改成荷官五種表情各一張，加 `--round` 改成照正常速度打一局、截下注／輪到你／結算／下一局四張；再加 `--classic` 改用舊版荷官造型。
    2. 改了 core 的規則或它的測試之後跑 `npm run mutants`：先確認沒破壞的基準全綠，再在暫存複本植入 63 種錯誤，每一種都要有具名的測試變紅（不在 `npm test` 裡）。新增規則時也往 `tests\mutants.js` 的表加一列。
-   3. 模擬手機尺寸一律走 `tests\browser_util.js` 的 CDP，不要用 `--window-size`：無頭視窗寬度最小被夾在約 500px，要 390 實得 496，截圖只截到左半邊而判準照樣綠。
-   4. 推上 main 後 GitHub Actions 會自動發布到 Pages（CI 只跑不開瀏覽器的測試）；workflow 跑完再跑 `node tools/check_live.js`，在線上網址桌機與手機各打兩局、確認線上版本等於本機 `BJK_VER`。
+   3. 改了 `dealer.js` 的 JOJO 畫法就重跑 `node tools/bake_dealer.js`：立牌貼的是它烘焙出光影的 `dealer_baked.js`，沒重跑 `check_dealer.js` 會判過期。
+   4. 模擬手機尺寸一律走 `tests\browser_util.js` 的 CDP，不要用 `--window-size`：無頭視窗寬度最小被夾在約 500px，要 390 實得 496，截圖只截到左半邊而判準照樣綠。
+   5. 推上 main 後 GitHub Actions 會自動發布到 Pages（CI 只跑不開瀏覽器的測試）；workflow 跑完再跑 `node tools/check_live.js`，在線上網址桌機與手機各打兩局、確認線上版本等於本機 `BJK_VER`。
 6. 畫面只照 `game.js` 回傳的事件演，不准自己去讀引擎狀態來擺牌或籌碼。`director.js` 每演完一個事件就拿畫面跟事件累積比、每批事件演完再跟引擎比，不一致記進 `mismatches`，`tests\check_play.js` 讀它。新增事件種類時，`handlers` 與 `checkAfter` 兩處都要加。
 7. 勝率提示（`core\odds.js`）只准吃畫面上翻開的牌：`director.js` 的 `computeOdds` 從 `rotation.z === 0` 的牌收，荷官底牌蓋著自然排除。不准改成讀引擎狀態——那裡有底牌。`check_ui_text.js` 斷言「算的牌數＝翻開的牌數」，對照是把底牌算進去。
 8. 籌碼存在 localStorage 的 `bjk.save.v1`（file:// 下整台電腦的本機檔共用同一個 origin，所以 key 帶專案前綴）。改存檔格式就換 key 的版號，不准讓舊存檔被讀成錯的數字；讀不到或格式不對一律當新玩家。
