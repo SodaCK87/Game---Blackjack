@@ -66,7 +66,7 @@
 1. 做法：用 Edit 改文字（含中文，不可用 `Get-Content`／`Set-Content` 轉手）；`.gitignore` 只改註解，不改 `dist/` 那行（除非 S-02 選了「刪掉 `dist`」）。
 2. 搬完怎麼驗：
    1. `(Get-Content "docs\檔案結構規範.md" -Encoding UTF8).Count` 與 `wc -l` 都不超過 150。
-   2. 交付把關 E0、E4、E10 照舊 PASS：`& "C:\Users\ben12\Downloads\ClaudeOnly\Claude規則研究\探針\交付把關\Probe-Delivery.ps1" -Project "C:\Users\ben12\Downloads\ClaudeOnly\GitHub Desktop\Game---Blackjack"`。
+   2. 交付把關 E0、E4、E10 照舊 PASS：本機的交付把關探針（`Claude規則研究\探針\交付把關\Probe-Delivery.ps1`）帶 `-Project <本 repo 路徑>`。
    3. `git check-ignore -v --no-index dist/a.html tools/_shots/x.png` 照舊命中，`git check-ignore -v --no-index app/index.html` 照舊不命中（退出碼 1）。
    4. `docs\問題台帳.md:6` 用標題文字〈缺陷編號、嚴重度與狀態〉指過來，改到那個標題就要一起改；動到任何標題時照 `github-docs-verify` 的消費端驗法驗錨點。
 3. 驗不過怎麼退：`git revert <該 commit>`；還沒 commit 就 `git restore -- docs/檔案結構規範.md .gitignore`。
