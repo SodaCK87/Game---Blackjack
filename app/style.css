@@ -648,6 +648,8 @@ body[data-fatal] #drawerHandle {
   font: 16px/1.45 "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   pointer-events: none;
+  /* 矮直式手機泡泡只剩 140–190 寬：不平均的話短句會斷成「請下／注！」 */
+  text-wrap: balance;
 }
 
 .bubble[hidden] {

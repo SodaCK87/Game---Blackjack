@@ -11,8 +11,14 @@ const { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_S
 const { availableBrowsers, withPage } = require('./browser_util');
 const { BJK_VER } = require('../app/js/core/version.js');
 
-// 開頁那一刻（main.js 第一次排版剛做完）：拉頁該已經在收起的位置，不是正要滑走
-const AT_LOAD = `document.addEventListener('DOMContentLoaded', () => {
+// 開頁那一刻（main.js 第一次排版剛做完）：拉頁該已經在收起的位置，不是正要滑走。
+// 光量位置不夠：全套平行跑、機器忙的時候，0.2 秒的滑動在 DOMContentLoaded 之前就滑完了，量到的是收起而判綠（2026-11-16 全套跑出來的假綠）。
+// 所以另外從頭記拉頁裡有沒有開始過 transition（transitionrun 不管滑多快都會發）
+const AT_LOAD = `window.__drawerRuns = [];
+document.addEventListener('transitionrun', e => {
+  if (e.target.closest && e.target.closest('#drawer')) window.__drawerRuns.push(e.propertyName);
+}, true);
+document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('soundToggle'), r = el.getBoundingClientRect();
   window.__drawerAtLoad = { soundRight: r.right, visibility: getComputedStyle(el).visibility };
 });`;
@@ -48,7 +54,7 @@ const CLOSED = `(async () => {
   const tags = [...document.querySelectorAll('#overlay .seat-tag')].filter(el => !el.hidden).map(el => {
     const r = el.getBoundingClientRect(); return { text: el.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
   const st = ${STATE};
-  return { ...st, atLoad: window.__drawerAtLoad, orient: document.body.dataset.orient, wallY: (1 - wallTop) / 2 * h, edgeY: (1 - edge.y) / 2 * h, tags,
+  return { ...st, atLoad: { ...window.__drawerAtLoad, runs: window.__drawerRuns.slice() }, orient: document.body.dataset.orient, wallY: (1 - wallTop) / 2 * h, edgeY: (1 - edge.y) / 2 * h, tags,
            outside: [innerWidth - 20, (st.handle.top + st.handle.bottom) / 2] };
 })()`;
 
@@ -78,7 +84,7 @@ const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bot
 
 function assertAtLoad(m) {
   const a = m.closed.atLoad;
-  assert.ok(a && a.soundRight <= 0 && a.visibility === 'hidden', `開頁那一刻拉頁不是收起的（會看到它滑走）：${JSON.stringify(a)}`);
+  assert.ok(a && a.soundRight <= 0 && a.visibility === 'hidden' && a.runs.length === 0, `開頁那一刻拉頁不是收起的（會看到它滑走）：${JSON.stringify(a)}`);
 }
 function assertCollapsed(m) {
   const c = m.closed, why = JSON.stringify(c);
