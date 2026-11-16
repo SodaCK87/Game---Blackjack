@@ -489,11 +489,11 @@ function loadSegments(d) {
     'main.js：建 WebGLRenderer': one('renderer.new'),
     'main.js：絨布貼圖現畫（9 萬個顆粒）': felt,
     'main.js：牌桌其餘（模型、籌碼架）': one('table.build') - felt,
-    'main.js：佈景（地毯、牆、光點）': one('room.build'),
+    'main.js：佈景（地毯、牆、大廳）': one('room.build'),
     'main.js：荷官建立（同步部分）': one('dealer.create'),
     'main.js：導演建立（扣掉其中的 render）': one('director.create') - dirRenders,
     'main.js：引擎（core 自測一局）': engineOutsideDirector,
-    'main.js：光點擺位（room.layout）': one('room.layout'),
+    'main.js：大廳擺位（room.layout）': one('room.layout'),
     'main.js：第一次 render（含 shader 編譯）': renders.length ? renders[0][1] : 0,
     'main.js：其餘 render': sum(renders.slice(1).map(x => x[1])),
   };
@@ -641,7 +641,7 @@ async function segResize() {
           const t0 = calls[0][0], t1 = calls[calls.length - 1][0] + calls[calls.length - 1][1];
           const total = sum(calls.map(x => x[1]));
           const render = spanSum(P, 'render', t0, t1), layout = spanSum(P, 'room.layout', t0, t1);
-          if (keep) addSample(e, total, { 'render': render, '光點擺位（room.layout）': layout, '其餘（框景二分搜尋、標籤、泡泡）': total - render - layout }, { 'resize 呼叫次數': calls.length });
+          if (keep) addSample(e, total, { 'render': render, '大廳擺位（room.layout）': layout, '其餘（框景二分搜尋、標籤、泡泡）': total - render - layout }, { 'resize 呼叫次數': calls.length });
         }
       });
     });

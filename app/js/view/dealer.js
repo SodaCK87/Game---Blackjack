@@ -79,8 +79,9 @@
 
     const saved = V.hud.loadPrefs().look;
     look = LOOK_NAMES.includes(saved) ? saved : LOOK_NAMES[0];
-    const ready = loadLook(look)
-      .then(set => {
+    // 牌、籌碼、大廳的插畫（textures.js）也一起等：都解碼好了才露面、重畫那一次，開頁只多畫一格
+    const ready = Promise.all([loadLook(look), V.textures.ready])
+      .then(([set]) => {
         textures = set;
         material.map = textures[mood];
         material.visible = true;

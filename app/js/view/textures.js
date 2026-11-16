@@ -1,8 +1,11 @@
-// 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 現畫：不帶外部圖檔，公開 repo 也就沒有素材授權的問題。
+// 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 畫；J、Q、K 的人物、牌背、籌碼頂面、牆後的大廳貼的是使用者用 GPT 生的
+// 點陣插畫（table_art.js），角標、面額、牌背中央的 21 仍由這裡寫上去。
 // 光澤、暗角、高光也一律畫進貼圖：開頁畫一次，之後每一格都不必再算，手機才省電（使用者 2026-10-31 選的做法）
 (function () {
   const BJK = (window.BJK = window.BJK || {});
   const V = (BJK.view = BJK.view || {});
+  if (!V.tableArt) throw new Error('載入順序錯：table_art.js 要排在 textures.js 之前');
+  const ART = V.tableArt;
 
   V.COLORS = {
     felt: '#0b6e4f', line: '#e8d9a8', teal: '#008080', dark: '#212c31',
@@ -30,6 +33,46 @@
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
+    return t;
+  }
+
+  // ---- 點陣插畫 ----
+  // 開頁就開始解碼（img.decode() 不佔主執行緒）。插畫解碼好之前要用到它的貼圖先畫成純色版，解碼完補畫一次、標記重傳；
+  // dealer.js 的 ready 等這裡跟荷官的圖都好了才重畫那一次，所以開頁只多補畫一次、不開迴圈。
+  // WebP 解不開（iOS 14 以前）就一直是純色版，牌照樣玩得下去
+  const art = {};
+  const later = [];
+  let artDone = false;
+  function decode(name, url) {
+    const img = new Image();
+    const loaded = new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; });
+    img.src = url;
+    return (img.decode ? img.decode() : loaded).then(() => { art[name] = img; return null; }, () => name);
+  }
+  const ready = Promise.all([
+    ...Object.entries(ART.court.images).map(([name, url]) => decode(name, url)),
+    decode('back', ART.back.image),
+    ...Object.entries(ART.chips.values).map(([value, c]) => decode(`chip${value}`, c.image)),
+    decode('lobby', ART.lobby.image),
+  ]).then(failed => {
+    failed = failed.filter(Boolean);
+    if (failed.length) console.warn(`這台瀏覽器解不開插畫（${failed.join('、')}），改用純色`);
+    artDone = true;
+    later.splice(0).forEach(fn => fn());
+  });
+
+  function drawn(w, h, draw) {
+    const c = canvas(w, h);
+    draw(c.getContext('2d'));
+    return toTexture(c);
+  }
+  // 用到插畫的貼圖：先畫一次；插畫還沒解碼好就登記，解碼完清掉重畫、重傳。
+  // 重傳前先 dispose 掉 GPU 上那一份：sRGB 貼圖原地重傳時，縮小看用的那幾層 mipmap 還是舊的純色版
+  // （2026-11-16 這台 Edge 量到：原尺寸對、縮成 4×4 時紅籌碼的綠色道 37.7 → 12），遠一點的籌碼與牌背就髒了
+  function painted(w, h, draw) {
+    const c = canvas(w, h), t = toTexture(c);
+    draw(c.getContext('2d'));
+    if (!artDone) later.push(() => { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, w, h); draw(ctx); t.dispose(); t.needsUpdate = true; });
     return t;
   }
 
@@ -228,123 +271,47 @@
   }
 
   // ---- J、Q、K 的人物 ----
-  // 照傳統撲克牌上下對稱：畫上半身，轉 180 度再畫一次，中間一條斜帶接起來。座標原點在牌中央，人物框 ±70 × ±115
-  const COURT_PALETTE = {
-    H: { robe: '#b3261e', robe2: '#861a14', sash: '#008080' },
-    D: { robe: '#c9731f', robe2: '#9c5413', sash: '#6c3483' },
-    S: { robe: '#2b4a60', robe2: '#1d3444', sash: '#b3261e' },
-    C: { robe: '#0f6b5c', robe2: '#0a4d42', sash: '#b3261e' },
-  };
-  const INK = '#212c31', GOLD = '#d9ae3c', SKIN = '#f2d2ae', SKIN2 = '#dcae88', CREAM = '#f7f4ec';
-
-  function courtHalf(ctx, rank, p) {
-    const draw = (d, fill, lw) => {
-      const path = new Path2D(d);
-      if (fill) { ctx.fillStyle = fill; ctx.fill(path); }
-      if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.stroke(path); }
-    };
-    const dot = (x, y, r, fill) => { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fillStyle = fill; ctx.fill(); };
-
-    // 拿的東西畫在人的後面：K 長劍、Q 花、J 長戟
-    if (rank === 'K') {
-      draw('M48 -110 L54 -118 L60 -110 L60 -32 L48 -32 Z', '#d7e0e3', 1.5);
-      draw('M54 -112 L54 -34', null, 0.8);
-      draw('M38 -34 L70 -34 L70 -27 L38 -27 Z', GOLD, 1.5);
-    } else if (rank === 'Q') {
-      draw('M52 -70 Q48 -48 44 -22', null, 2.5);
-      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; dot(53 + 9 * Math.cos(a), -82 + 9 * Math.sin(a), 6.5, p.sash); }
-      dot(53, -82, 5, GOLD);
-    } else {
-      draw('M53 -116 L53 -14', null, 3.5);
-      draw('M53 -118 L62 -98 L53 -90 L44 -98 Z', GOLD, 1.5);
-    }
-
-    // 袍子：兩色分出受光面，中間一條綬帶綴金色小菱形
-    draw('M-72 24 L-72 -14 Q-48 -32 -20 -36 L20 -36 Q48 -32 72 -14 L72 24 Z', p.robe, 2);
-    draw('M0 -36 L20 -36 Q48 -32 72 -14 L72 24 L0 24 Z', p.robe2);
-    draw('M-72 -2 Q-44 -20 -24 -20 M72 -2 Q44 -20 24 -20', null, 0);
-    ctx.strokeStyle = GOLD; ctx.lineWidth = 3;
-    ctx.stroke(new Path2D('M-70 2 Q-46 -18 -22 -20 M70 2 Q46 -18 22 -20'));
-    draw('M-13 -36 L13 -36 L18 24 L-18 24 Z', p.sash, 1.5);
-    for (const y of [-22, -6, 10]) draw(`M0 ${y - 6} L5 ${y} L0 ${y + 6} L-5 ${y} Z`, GOLD);
-
-    // 領子：K 白毛領帶黑點、Q 金邊領、J 立領
-    draw('M-30 -38 Q0 -18 30 -38 L35 -28 Q0 -8 -35 -28 Z', rank === 'K' ? CREAM : rank === 'Q' ? GOLD : CREAM, 1.5);
-    if (rank === 'K') for (const x of [-22, -8, 8, 22]) dot(x, -24 - Math.abs(x) * 0.1, 1.8, INK);
-
-    draw('M-9 -46 L9 -46 L10 -33 Q0 -28 -10 -33 Z', SKIN2, 1.5);
-    // 頭髮在臉的後面
-    if (rank === 'Q') draw('M-21 -74 Q-33 -46 -25 -22 L-13 -30 Q-20 -50 -15 -70 Z M21 -74 Q33 -46 25 -22 L13 -30 Q20 -50 15 -70 Z', '#c58f2e', 1.5);
-    if (rank === 'J') draw('M-20 -72 Q-28 -54 -21 -40 L-12 -44 L-14 -70 Z M20 -72 Q28 -54 21 -40 L12 -44 L14 -70 Z', '#8a5a2b', 1.5);
-    if (rank === 'K') draw('M-20 -70 Q-26 -50 -17 -38 L-12 -50 Z M20 -70 Q26 -50 17 -38 L12 -50 Z', '#6b4a2a', 1.5);
-
-    ctx.beginPath(); ctx.ellipse(0, -62, 18, 22, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = SKIN; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.stroke();
-    draw('M4 -83 Q18 -78 18 -62 Q18 -46 4 -40 Q12 -60 4 -83 Z', SKIN2);
-    if (rank === 'K') {
-      draw('M-17 -58 Q-18 -36 0 -30 Q18 -36 17 -58 Q11 -49 3 -51 Q0 -49 -3 -51 Q-11 -49 -17 -58 Z', '#6b4a2a', 1.5);
-    }
-    // 五官
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = INK; ctx.lineWidth = 1.8;
-    ctx.stroke(new Path2D('M-12 -69 Q-7 -72 -3 -69 M12 -69 Q7 -72 3 -69'));
-    dot(-7, -65, 1.9, INK); dot(7, -65, 1.9, INK);
-    ctx.lineWidth = 1.4;
-    ctx.stroke(new Path2D('M0 -64 L-2 -55 L2 -54'));
-    ctx.strokeStyle = rank === 'K' ? CREAM : '#a5302a'; ctx.lineWidth = 2;
-    ctx.stroke(new Path2D('M-6 -47 Q0 -44 6 -47'));
-    ctx.lineCap = 'butt';
-
-    // 頭上：K 高冠、Q 小冠、J 羽毛帽
-    if (rank === 'K') {
-      draw('M-20 -80 L-25 -106 L-12 -94 L0 -112 L12 -94 L25 -106 L20 -80 Z', GOLD, 2);
-      draw('M-21 -84 L21 -84 L21 -78 L-21 -78 Z', p.sash, 1.5);
-      dot(0, -100, 3, p.robe); dot(-25, -107, 2.6, CREAM); dot(25, -107, 2.6, CREAM); dot(0, -113, 2.6, CREAM);
-    } else if (rank === 'Q') {
-      draw('M-17 -79 L-19 -97 L-9 -88 L0 -102 L9 -88 L19 -97 L17 -79 Z', GOLD, 2);
-      for (const [x, y] of [[-19, -98], [0, -103], [19, -98]]) dot(x, y, 2.8, CREAM);
-      dot(0, -86, 3, p.sash);
-    } else {
-      draw('M14 -92 Q36 -116 44 -92 Q32 -98 20 -84 Z', GOLD, 1.5);
-      draw('M-21 -76 Q-20 -98 4 -97 Q22 -96 22 -76 Z', p.sash, 2);
-      draw('M-23 -80 L23 -80 L23 -73 L-23 -73 Z', GOLD, 1.5);
-    }
+  // 插畫鋪滿牌面中間（四周留紙緣），左上、右下各挖一角給角標：角標在手機上只有十幾個像素高，壓在插畫的斜線底紋上
+  // 就讀不出來。原圖的武器與花拿在左上、右下，產生器已經左右鏡像過，挖掉的兩角是素底
+  const COURT_FILE = { K: 'king', Q: 'queen', J: 'jack' };
+  const NOTCH = [62, 112];   // 挖掉的角從牌角量到這裡（牌面像素），角標的字與花色都在裡面
+  function courtPath(ctx) {
+    const [w, h] = ART.court.size, x0 = (CW - w) / 2, y0 = (CH - h) / 2, x1 = x0 + w, y1 = y0 + h;
+    const nx = NOTCH[0], ny = NOTCH[1], r = 9;
+    ctx.beginPath();
+    ctx.moveTo((nx + x1) / 2, y0);
+    ctx.arcTo(x1, y0, x1, y1, r);
+    ctx.arcTo(x1, CH - ny, x0, CH - ny, r);
+    ctx.arcTo(CW - nx, CH - ny, CW - nx, y1, r);
+    ctx.arcTo(CW - nx, y1, x0, y1, r);
+    ctx.arcTo(x0, y1, x0, y0, r);
+    ctx.arcTo(x0, ny, x1, ny, r);
+    ctx.arcTo(nx, ny, nx, y0, r);
+    ctx.arcTo(nx, y0, x1, y0, r);
+    ctx.closePath();
   }
-
   function courtFigure(ctx, rank, suit) {
-    const p = COURT_PALETTE[suit];
+    const img = art[`${COURT_FILE[rank]}_${suit === 'H' || suit === 'D' ? 'red' : 'black'}`];
+    const [w, h] = ART.court.size;
     ctx.save();
-    ctx.translate(CW / 2, CH / 2);
-    ctx.beginPath(); ctx.roundRect(-70, -115, 140, 230, 8);
-    ctx.fillStyle = V.COLORS.faceFrame; ctx.fill();
-    ctx.save();
-    ctx.clip();
-    // 底紋：細斜線，人物才不是貼在白紙上
-    ctx.strokeStyle = 'rgba(0,128,128,0.13)'; ctx.lineWidth = 1.5;
-    for (let d = -230; d < 230; d += 11) { ctx.beginPath(); ctx.moveTo(d - 115, -115); ctx.lineTo(d + 115, 115); ctx.stroke(); }
-    for (const turn of [0, Math.PI]) {
-      ctx.save();
-      ctx.rotate(turn);
-      ctx.save();
-      ctx.beginPath(); ctx.moveTo(-72, 11); ctx.lineTo(72, -11); ctx.lineTo(72, -120); ctx.lineTo(-72, -120); ctx.closePath(); ctx.clip();
-      courtHalf(ctx, rank, p);
-      ctx.restore();
-      drawSuit(ctx, suit, -49, -92, 36, false);
-      ctx.restore();
+    courtPath(ctx);
+    if (img) {
+      ctx.save(); ctx.clip(); ctx.drawImage(img, (CW - w) / 2, (CH - h) / 2); ctx.restore();
+    } else {
+      ctx.fillStyle = V.COLORS.faceFrame; ctx.fill();
+      drawSuit(ctx, suit, CW / 2, CH / 2, 110, false);
+      courtPath(ctx);
     }
-    ctx.beginPath(); ctx.moveTo(-72, 11); ctx.lineTo(72, -11);
-    ctx.strokeStyle = INK; ctx.lineWidth = 8; ctx.stroke();
-    ctx.strokeStyle = GOLD; ctx.lineWidth = 5; ctx.stroke();
-    ctx.restore();
-    ctx.beginPath(); ctx.roundRect(-70, -115, 140, 230, 8);
-    ctx.strokeStyle = V.COLORS.teal; ctx.lineWidth = 3; ctx.stroke();
+    // 框線：深色描邊外面一道燙金，跟插畫的黑線金邊同一套
+    ctx.strokeStyle = 'rgba(33,44,49,0.85)'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = foil(ctx, 0, 0, CW, CH, 2); ctx.lineWidth = 2; ctx.stroke();
     ctx.restore();
   }
 
-  function cardFace(rank, suit) {
-    const c = canvas(CW, CH), ctx = c.getContext('2d');
+  function cardFace(ctx, rank, suit) {
     cardShape(ctx, V.COLORS.cardFace);
     ctx.strokeStyle = 'rgba(33,44,49,0.3)'; ctx.lineWidth = 5; ctx.stroke();
+    if (rank === 'J' || rank === 'Q' || rank === 'K') courtFigure(ctx, rank, suit);
     const color = suitColor(suit);
     for (const flip of [false, true]) {
       ctx.save();
@@ -356,63 +323,37 @@
       drawSuit(ctx, suit, 32, 88, 36, false);
       ctx.restore();
     }
-    if (rank === 'J' || rank === 'Q' || rank === 'K') {
-      courtFigure(ctx, rank, suit);
-    } else if (rank === 'A') {
+    if (rank === 'A') {
       ctx.beginPath(); ctx.arc(CW / 2, CH / 2, 74, 0, 2 * Math.PI);
       ctx.strokeStyle = 'rgba(0,128,128,0.4)'; ctx.lineWidth = 2; ctx.setLineDash([2, 7]); ctx.stroke(); ctx.setLineDash([]);
       drawSuit(ctx, suit, CW / 2, CH / 2, 120, false);
-    } else {
+    } else if (PIPS[rank]) {
       PIPS[rank].forEach(([px, py]) => drawSuit(ctx, suit, CW / 2 + px * 50, CH / 2 + py * 96, 46, py > 0));
     }
     sheen(ctx);
-    return toTexture(c);
   }
 
-  function cardBack() {
-    const c = canvas(CW, CH), ctx = c.getContext('2d');
-    const base = ctx.createLinearGradient(0, 0, CW, CH);
-    base.addColorStop(0, '#0a9090'); base.addColorStop(1, '#005f5f');
-    cardShape(ctx, base);
+  // 牌背：插畫縮成牌的大小（產生器做的），中央那個空圓寫 21
+  function cardBack(ctx) {
     ctx.save();
-    ctx.beginPath(); ctx.roundRect(18, 18, CW - 36, CH - 36, 10); ctx.clip();
-    ctx.strokeStyle = 'rgba(244,230,173,0.42)'; ctx.lineWidth = 1.5;
-    for (let d = -CH; d < CW + CH; d += 20) {
-      ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d + CH, CH); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(d, CH); ctx.lineTo(d + CH, 0); ctx.stroke();
-    }
-    // 格線每個交點一顆金點
-    ctx.fillStyle = 'rgba(244,230,173,0.75)';
-    for (let d = -CH; d < CW + CH; d += 20) {
-      for (let e = -CH; e < CW + CH; e += 20) {
-        const x = (d + e + CH) / 2, y = (e - d + CH) / 2;
-        if (y > 0 && y < CH && x > 0 && x < CW) { ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 2 * Math.PI); ctx.fill(); }
-      }
+    ctx.beginPath(); ctx.roundRect(0, 0, CW, CH, 22); ctx.clip();
+    const [cx, cy, rx, ry] = ART.back.hole;
+    if (art.back) {
+      ctx.drawImage(art.back, 0, 0, CW, CH);
+    } else {
+      const base = ctx.createLinearGradient(0, 0, CW, CH);
+      base.addColorStop(0, '#0a9090'); base.addColorStop(1, '#005f5f');
+      ctx.fillStyle = base; ctx.fillRect(0, 0, CW, CH);
+      ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+      ctx.fillStyle = V.COLORS.dark; ctx.fill();
     }
     ctx.restore();
-    const gold = foil(ctx, 0, 0, CW, CH);
-    ctx.beginPath(); ctx.roundRect(11, 11, CW - 22, CH - 22, 15);
-    ctx.strokeStyle = gold; ctx.lineWidth = 4; ctx.stroke();
-    ctx.beginPath(); ctx.roundRect(18, 18, CW - 36, CH - 36, 10);
-    ctx.lineWidth = 1.5; ctx.stroke();
-    // 中央徽章：放射狀金瓣圍一圈，中間深底 21
-    ctx.save();
-    ctx.translate(CW / 2, CH / 2);
-    ctx.fillStyle = gold;
-    for (let i = 0; i < 24; i++) {
-      ctx.rotate(Math.PI / 12);
-      ctx.beginPath(); ctx.moveTo(-6, -50); ctx.lineTo(0, -66); ctx.lineTo(6, -50); ctx.closePath(); ctx.fill();
-    }
-    ctx.restore();
-    ctx.beginPath(); ctx.arc(CW / 2, CH / 2, 52, 0, 2 * Math.PI);
-    ctx.fillStyle = V.COLORS.dark; ctx.fill(); ctx.strokeStyle = gold; ctx.lineWidth = 4; ctx.stroke();
-    ctx.beginPath(); ctx.arc(CW / 2, CH / 2, 44, 0, 2 * Math.PI);
-    ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = gold;
-    ctx.font = `bold 46px ${SERIF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('21', CW / 2, CH / 2 + 2);
+    ctx.fillStyle = foil(ctx, cx - rx, cy - ry, cx + rx, cy + ry);
+    ctx.font = `bold ${Math.round(Math.min(rx, ry) * 1.3)}px ${SERIF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowOffsetY = 1.5; ctx.shadowBlur = 2;
+    ctx.fillText('21', cx, cy + 1.5);
+    ctx.shadowColor = 'transparent';
     sheen(ctx);
-    return toTexture(c);
   }
 
   // 整疊牌的側面：一層層紙邊
@@ -425,13 +366,22 @@
   }
 
   // ---- 籌碼 ----
-  V.CHIP_COLORS = { 5: '#b3261e', 25: '#1e7f4f', 100: '#212c31', 500: '#6c3483', 1000: '#c9a227' };
+  // 頂面是插畫（產生器裁到盤面、量好中央空白與邊環），面額字寫在中央；側面照插畫量到的底色與嵌片色畫條紋，
+  // 條紋對齊頂面的嵌片，疊起來看是同一片嵌片從頂面延伸到側邊
+  const CHIP = ART.chips.values;
+  V.CHIP_COLORS = Object.fromEntries(Object.entries(CHIP).map(([value, c]) => [value, c.base]));
+  const luma = hex => { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };
 
   function chipSide(value) {
-    const c = canvas(256, 32), ctx = c.getContext('2d');
-    ctx.fillStyle = V.CHIP_COLORS[value]; ctx.fillRect(0, 0, 256, 32);
-    ctx.fillStyle = V.COLORS.cardFace;
-    for (let i = 0; i < 8; i++) ctx.fillRect(i * 32 + 10, 0, 12, 32);
+    const C = CHIP[value], c = canvas(256, 32), ctx = c.getContext('2d');
+    ctx.fillStyle = C.base; ctx.fillRect(0, 0, 256, 32);
+    // 畫布的 x 就是繞圓柱一圈的角度（0＝頂面貼圖的右邊、逆時針），跟頂面的嵌片方位同一套
+    ctx.fillStyle = C.stripe;
+    const w = C.duty * 32;
+    for (let i = 0; i < 8; i++) {
+      const x = (C.phase + i * 45) / 360 * 256 - w / 2;
+      for (const shift of [-256, 0, 256]) ctx.fillRect(x + shift, 0, w, 32);
+    }
     // 側面是圓弧倒角：上半迎光、下半背光（畫布第 0 列是籌碼的上緣）
     const bevel = ctx.createLinearGradient(0, 4, 0, 28);
     bevel.addColorStop(0, 'rgba(255,255,255,0.22)'); bevel.addColorStop(0.4, 'rgba(255,255,255,0)'); bevel.addColorStop(1, 'rgba(0,0,0,0.3)');
@@ -442,50 +392,30 @@
     return c;
   }
 
-  // 籌碼會隨機轉角度、還會飛，高光畫成一圈圈同心的，轉到哪個角度都說得通
-  function chipTop(value) {
-    const c = canvas(256, 256), ctx = c.getContext('2d');
-    const color = V.CHIP_COLORS[value], ink = value === 1000 ? V.COLORS.dark : V.COLORS.cardFace;
-    ctx.fillStyle = color; ctx.fillRect(0, 0, 256, 256);
-    ctx.beginPath(); ctx.arc(128, 128, 127, 0, 2 * Math.PI);
-    ctx.fillStyle = color; ctx.fill();
-    // 外圈八塊嵌片，一塊兩條金邊
-    for (let i = 0; i < 8; i++) {
-      const a = i * Math.PI / 4;
-      ctx.beginPath(); ctx.arc(128, 128, 111, a, a + 0.3);
-      ctx.strokeStyle = V.COLORS.cardFace; ctx.lineWidth = 26; ctx.stroke();
+  // 插畫的光從左上打。籌碼只在一個小角度內隨機轉（chips.js 的 jitter），光的方向在每一片上都差不多，面額字也大致是正的
+  function chipTop(ctx, value) {
+    const C = CHIP[value], S = 256;
+    if (art[`chip${value}`]) {
+      ctx.drawImage(art[`chip${value}`], 0, 0, S, S);
+    } else {
+      ctx.beginPath(); ctx.arc(S / 2, S / 2, S / 2, 0, 2 * Math.PI);
+      ctx.fillStyle = C.base; ctx.fill();
     }
-    // 凹槽：一道暗線配一道亮線
-    ctx.beginPath(); ctx.arc(128, 128, 94, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 4; ctx.stroke();
-    ctx.beginPath(); ctx.arc(128, 128, 91, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 2; ctx.stroke();
-    // 中央面額嵌片
-    const inlay = ctx.createRadialGradient(128, 128, 20, 128, 128, 76);
-    inlay.addColorStop(0, 'rgba(255,255,255,0.2)'); inlay.addColorStop(1, 'rgba(0,0,0,0.12)');
-    ctx.beginPath(); ctx.arc(128, 128, 76, 0, 2 * Math.PI);
-    ctx.fillStyle = inlay; ctx.fill();
-    ctx.strokeStyle = value === 1000 ? V.COLORS.dark : foil(ctx, 40, 40, 216, 216); ctx.lineWidth = 4; ctx.stroke();
-    ctx.fillStyle = ink;
+    // 面額字：最寬撐到中央空白的八成；淺色的金籌碼寫深色字
+    ctx.save();
+    ctx.fillStyle = luma(C.center) > 140 ? V.COLORS.dark : V.COLORS.cardFace;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowOffsetX = 1.5; ctx.shadowOffsetY = 2; ctx.shadowBlur = 3;
     ctx.font = `bold ${value >= 1000 ? 54 : 66}px ${SERIF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(value), 128, 132, 132);
-    // 外緣倒角：往邊上先亮一圈、再壓暗收邊，頂面看起來是凸起的圓餅而不是一張貼紙
-    const rim = ctx.createRadialGradient(128, 128, 100, 128, 128, 128);
-    rim.addColorStop(0, 'rgba(255,255,255,0)'); rim.addColorStop(0.62, 'rgba(255,255,255,0.3)');
-    rim.addColorStop(0.8, 'rgba(255,255,255,0)'); rim.addColorStop(1, 'rgba(0,0,0,0.4)');
-    ctx.beginPath(); ctx.arc(128, 128, 128, 0, 2 * Math.PI);
-    ctx.fillStyle = rim; ctx.fill();
-    return toTexture(c);
+    ctx.fillText(String(value), S / 2, S / 2 + 4, C.inner * S * 0.8);
+    ctx.restore();
   }
 
   // 頂面與側面畫在同一張：一片籌碼一種材質、一個 draw call。top、side 是各自佔整張貼圖高度的比例（chips.js 拿去算 UV）
   const ATLAS_H = 292;
-  function chipAtlas(value) {
-    const c = canvas(256, ATLAS_H), ctx = c.getContext('2d');
-    ctx.fillStyle = V.CHIP_COLORS[value]; ctx.fillRect(0, 0, 256, ATLAS_H);
-    ctx.drawImage(V.textures.chipTop(value).image, 0, 0);
+  function chipAtlas(ctx, value) {
+    ctx.fillStyle = CHIP[value].base; ctx.fillRect(0, 0, 256, ATLAS_H);
+    chipTop(ctx, value);
     ctx.drawImage(chipSide(value), 0, ATLAS_H - 32);
-    return toTexture(c);
   }
 
   // ---- 桌緣（table.js）----
@@ -615,38 +545,16 @@
     return toTexture(c);
   }
 
-  function hexColor(n) { return `${n >> 16},${(n >> 8) & 255},${n & 255}`; }
-
-  // 牆後的大廳：照實際畫面大小畫（光點直徑才是 CSS 像素），圖本身不大、不做 mipmap，它不會被縮小看
-  function hall() {
-    const t = toTexture(canvas(1024, 512));
+  // 牆後的大廳：插畫直接當貼圖，room.js 照畫面比例調 UV 裁一塊，換螢幕比例不必重畫。不做 mipmap：桌機約一比一、手機是放大看。
+  // 解碼好之前沒有圖，three 綁一張全黑的空貼圖，跟場景的暗底看不出差別；材質一開始就帶著這張貼圖，換上圖不必重編著色器
+  function lobby() {
+    const t = new THREE.Texture();
+    t.colorSpace = THREE.SRGBColorSpace;
     t.generateMipmaps = false;
     t.minFilter = THREE.LinearFilter;
+    const set = () => { if (art.lobby) { t.image = art.lobby; t.needsUpdate = true; } };
+    if (artDone) set(); else later.push(set);
     return t;
-  }
-  function paintHall(tex, plan, w, h, voidColor) {
-    const c = tex.image, ctx = c.getContext('2d');
-    ctx.setTransform(c.width / w, 0, 0, c.height / h, 0, 0);
-    ctx.globalCompositeOperation = 'source-over';
-    // 上方是大廳的暗處，往牆頭漸漸染上老虎機的暖光
-    const v = hexColor(voidColor), sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, `rgb(${v})`); sky.addColorStop(0.55, `rgb(${v})`); sky.addColorStop(1, '#33201a');
-    ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = 'lighter';
-    for (const b of plan) {
-      const x = (b.x + 1) / 2 * w, y = (1 - b.v) * h, r = b.px / 2, rgb = hexColor(b.color), a = b.opacity;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      if (b.soft) {
-        g.addColorStop(0, `rgba(${rgb},${a})`); g.addColorStop(1, `rgba(${rgb},0)`);
-      } else {
-        // 失焦光點中間略暗、外緣一圈亮邊，最外面柔柔地收掉
-        g.addColorStop(0, `rgba(${rgb},${a * 0.55})`); g.addColorStop(0.72, `rgba(${rgb},${a * 0.7})`);
-        g.addColorStop(0.88, `rgba(${rgb},${a})`); g.addColorStop(1, `rgba(${rgb},0)`);
-      }
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
-    }
-    tex.needsUpdate = true;
   }
 
   function white() {
@@ -662,16 +570,19 @@
   }
 
   V.textures = {
-    felt, paintHall,
+    felt,
+    // 插畫全解碼完（解不開的已經改用純色）、要補畫的都補畫好了
+    ready,
     CHIP_ATLAS: { top: 256 / ATLAS_H, side: 32 / ATLAS_H },
     CARD_SHADOW, CHIP_SHADOW,
     cardShadow: () => cached('cardShadow', cardShadow),
     chipShadow: () => cached('chipShadow', chipShadow),
-    cardFace: (rank, suit) => cached(`face-${rank}${suit}`, () => cardFace(rank, suit)),
-    cardBack: () => cached('back', cardBack),
+    cardFace: (rank, suit) => cached(`face-${rank}${suit}`, () => (COURT_FILE[rank] ? painted : drawn)(CW, CH, ctx => cardFace(ctx, rank, suit))),
+    cardBack: () => cached('back', () => painted(CW, CH, cardBack)),
     deckEdge: () => cached('deckEdge', deckEdge),
-    chipAtlas: value => cached(`atlas-${value}`, () => chipAtlas(value)),
-    chipTop: value => cached(`top-${value}`, () => chipTop(value)),
+    chipAtlas: value => cached(`atlas-${value}`, () => painted(256, ATLAS_H, ctx => chipAtlas(ctx, value))),
+    // showcase.js 的大特效拿它的畫布當噴出來的籌碼
+    chipTop: value => cached(`top-${value}`, () => painted(256, 256, ctx => chipTop(ctx, value))),
     leather: () => cached('leather', leather),
     wood: () => cached('wood', wood),
     glass: () => cached('glass', glass),
@@ -680,6 +591,6 @@
     woodPanel: () => cached('woodPanel', woodPanel),
     tableShadow: (R, pad) => cached('tableShadow', () => tableShadow(R, pad)),
     brass: () => cached('brass', brass),
-    hall: () => cached('hall', hall),
+    lobby: () => cached('lobby', lobby),
   };
 })();

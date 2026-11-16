@@ -1,40 +1,16 @@
 // 牌桌以外的佈景：拉斯維加斯大廳。荷官背後一道木牆板隔間、上緣一條黃銅扶手，
-// 牆後是遠處吃角子老虎與水晶燈的失焦光點，地上鋪地毯。
+// 牆後是遠處吃角子老虎與水晶燈的失焦照片（插畫），地上鋪地毯。
 // 靜態：不開動畫迴圈，跟著既有的重畫一起畫（使用者 2026-10-22 選靜態，手機省電）
 (function () {
   const V = window.BJK.view;
   const FLOOR_Y = -0.82;
   const WALL_Z = -5, WALL_H = 1.3, WALL_W = 200;
-  const VOID = 0x0d1215;   // 牆後大廳的暗處，也是場景底色
+  const VOID = 0x0d1215;   // 場景底色：大廳的圖解碼好之前、圖以外的地方
+  // 大廳那張圖壓到三分之一亮：原圖那一帶平均亮度跟絨布差不多（2026-11-16 量到 65～97 對 93），
+  // 壓暗後 18～29，跟舊版光點的 20～29 同一級（tests/check_room.js 守不到絨布的四成）
+  const DIM = 0x555555;
   // 大廳那張圖離鏡頭的距離：要在牆後面、又在鏡頭 far（100）以內
   const BACK_DIST = 60;
-
-  // 光點照「畫面位置」排，不照世界座標：鏡頭依螢幕比例換角度，照世界座標擺的話手機和桌機看到的會差很多。
-  // x 是畫面左右（−1…1），v 是牆上緣到畫面頂端之間的高度（0…1），px 是直徑（CSS 像素）
-  function bokehPlan() {
-    const rng = V.rng(31), out = [];
-    const SLOT = [0xe0a040, 0xc0392b, 0xd4a017, 0x008080, 0x9b59b6];
-    const pick = n => SLOT[Math.floor(rng() * n)];
-    // 吃角子老虎：一排排小光點，越上面的排越遠，所以越小、越密
-    for (let row = 0; row < 6; row++) {
-      for (let i = 0; i < 16 + row * 4; i++) {
-        out.push({ x: -1.05 + rng() * 2.1, v: 0.03 + row * 0.1 + rng() * 0.06, px: (13 - row * 1.5) * (0.6 + rng() * 0.6), color: pick(SLOT.length), opacity: 0.18 + rng() * 0.14 });
-      }
-    }
-    // 水晶燈：最上面幾團暖白小光點
-    for (let k = 0; k < 4; k++) {
-      const cx = -0.8 + k * 0.53 + (rng() - 0.5) * 0.2, cv = 0.78 + rng() * 0.14;
-      out.push({ x: cx, v: cv, px: 110, color: 0xffd9a0, opacity: 0.1, soft: true });
-      for (let i = 0; i < 9; i++) {
-        out.push({ x: cx + (rng() - 0.5) * 0.18, v: cv + (rng() - 0.5) * 0.1, px: 3 + rng() * 5, color: 0xffe2a8, opacity: 0.2 + rng() * 0.12 });
-      }
-    }
-    // 近一點的大光斑：稀疏、很淡
-    for (let i = 0; i < 14; i++) {
-      out.push({ x: -1 + rng() * 2, v: rng(), px: 28 + rng() * 40, color: pick(3), opacity: 0.035 + rng() * 0.04 });
-    }
-    return out;
-  }
 
   function build() {
     const group = new THREE.Group();
@@ -64,16 +40,15 @@
     rail.position.set(0, FLOOR_Y + WALL_H + 0.05, WALL_Z);
     group.add(floor, shade, wall, rail);
 
-    // 牆後的大廳一張圖畫完：一個 draw call、每個像素只畫一層。原本 206 顆光點各一個 Sprite，大光斑還層層疊加
-    const plan = bokehPlan();
-    const hall = V.textures.hall();
-    const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: hall, depthWrite: false }));
+    // 牆後的大廳是一張插畫（table_art.js），一個 draw call、每個像素只畫一層。使用者要背景壓暗、不跟牌桌搶眼，顏色乘上 DIM
+    const lobby = V.textures.lobby();
+    const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: lobby, color: DIM, depthWrite: false }));
     backdrop.userData.kind = 'backdrop';
     group.add(backdrop);
 
     const top = new THREE.Vector3(0, FLOOR_Y + WALL_H + 0.12, WALL_Z);
     const fwd = new THREE.Vector3(), up = new THREE.Vector3();
-    let paintedW = 0, paintedH = 0;
+    const { size: [iw, ih], wall: line, focus } = V.tableArt.lobby;
     // 鏡頭定好之後呼叫：把大廳那張圖貼在牆上緣與畫面頂端之間。回傳牆上緣在畫面上的高度（−1 底、1 頂）
     function layout(camera, heightPx) {
       camera.updateMatrixWorld();
@@ -85,16 +60,19 @@
       backdrop.quaternion.copy(camera.quaternion);
       backdrop.scale.set(frustumH * camera.aspect, frustumH * (1 - low) / 2, 1);
       backdrop.position.copy(camera.position).addScaledVector(fwd, BACK_DIST).addScaledVector(up, (1 + low) / 2 * frustumH / 2);
-      // 手機網址列收放也會觸發 resize，高度只差幾十像素就不重畫這張圖
-      const w = camera.aspect * heightPx, h = heightPx * (1 - low) / 2;
-      if (Math.abs(w - paintedW) > 60 || Math.abs(h - paintedH) > 60) {
-        paintedW = w; paintedH = h;
-        V.textures.paintHall(hall, plan, w, h, VOID);
-      }
+      // 照畫面位置裁圖、只調 UV 不重畫：圖的牆線對著牆上緣，寬要蓋滿畫面、高要蓋滿牆上那一帶，取兩者較大的倍率，不拉變形。
+      // 直式手機那一帶高，水晶燈到整排老虎機都看得到、左右裁掉；桌機那一帶矮，只看得到構圖中心附近那一條
+      const W = camera.aspect * heightPx, band = (1 - base) / 2 * heightPx, below = (base - low) / 2 * heightPx;
+      const k = Math.max(W / iw, band / (line * ih));   // 畫面像素／圖的像素
+      const win = band / k;
+      const bottom = Math.min(Math.max(focus * ih + win / 2, win), line * ih);
+      const rowTop = bottom - win, rowLow = bottom + below / k;
+      lobby.repeat.set(W / k / iw, (rowLow - rowTop) / ih);
+      lobby.offset.set((1 - W / k / iw) / 2, 1 - rowLow / ih);
       return base;
     }
 
-    return { group, layout, backdrop, plan };
+    return { group, layout, backdrop };
   }
 
   V.room = { build, VOID, WALL_Z };

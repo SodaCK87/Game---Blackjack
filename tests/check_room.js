@@ -1,5 +1,6 @@
 // 守佈景（room.js）：各種螢幕比例下，荷官背後的牆上方都留得出一帶大廳光點、光點都在牆後面，
-// 而且背景整體明顯比牌桌暗（使用者 2026-10-22 要求壓暗、不要花）。
+// 而且背景整體明顯比牌桌暗（使用者 2026-10-22 要求壓暗、不要花）。大廳是一張插畫（v0.21.0），照畫面比例調 UV 裁一塊：
+// 橫豎的倍率一樣（沒拉變形）、裁的範圍在圖裡面（沒有拿邊緣那一排像素拉長來補）。
 // 驗不到：好不好看、像不像拉斯維加斯、花紋會不會太花（看 node tools/shoot.js <前綴> 的截圖）。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -62,6 +63,13 @@ const MEASURE = `(async () => {
   const backdrop = s.room.backdrop;
   backdrop.updateMatrixWorld();
   const backZ = [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]].map(([x, y]) => new THREE.Vector3(x, y, 0).applyMatrix4(backdrop.matrixWorld).z);
+  // 大廳那張圖在畫面上一個圖素多寬、多高（畫面像素）：圖在畫面上的寬高 ÷ UV 裁到的圖素數
+  const corner = (x, y) => toPx(new THREE.Vector3(x, y, 0).applyMatrix4(backdrop.matrixWorld));
+  const bl = corner(-0.5, -0.5), br = corner(0.5, -0.5), tl = corner(-0.5, 0.5);
+  const map = backdrop.material.map, [iw, ih] = V.tableArt.lobby.size;
+  const texel = { x: Math.hypot(br.x - bl.x, br.row - bl.row) / (map.repeat.x * iw), y: Math.hypot(tl.x - bl.x, tl.row - bl.row) / (map.repeat.y * ih) };
+  // 牆上緣那一列落在圖的哪裡（v，0＝圖底、1＝圖頂）：要在圖裡面，牆以上看得到的那一帶才全是圖
+  const atWall = map.offset.y + (wallRow - bl.row) / (tl.row - bl.row) * map.repeat.y;
   return {
     wallTop, bandFrac: (1 - wallTop) / 2,
     feltLum: felt.reduce((a, b) => a + b, 0) / felt.length,
@@ -69,6 +77,7 @@ const MEASURE = `(async () => {
     lowerLum: mean(bare, 0, W, 0, wallRow - 2),
     litCells: lit.length, totalCells, litLeft: lit.filter(c => c.i < COLS / 2).length, litRight: lit.filter(c => c.i >= COLS / 2).length,
     frontMostZ: Math.max(...backZ), wallZ: V.room.WALL_Z,
+    stretch: +(texel.x / texel.y).toFixed(3), uv: { left: map.offset.x, right: map.offset.x + map.repeat.x, top: map.offset.y + map.repeat.y, wall: atWall },
   };
 })()`;
 
@@ -86,6 +95,9 @@ function assertRoom(m, what) {
   assert.ok(m.bandFrac >= 0.1, `牆上緣以上留給大廳的不到畫面一成：${why}`);
   assert.ok(m.litCells >= m.totalCells / 8 && m.litLeft >= m.totalCells / 32 && m.litRight >= m.totalCells / 32, `看得到的光點太少或全擠在一邊：${why}`);
   assert.ok(m.frontMostZ < m.wallZ, `有光點跑到牆前面：${why}`);
+  assert.ok(Math.abs(m.stretch - 1) < 0.01, `大廳那張圖被拉變形（橫比直 ${m.stretch} 倍）：${why}`);
+  const eps = 1e-6;
+  assert.ok(m.uv.left >= -eps && m.uv.right <= 1 + eps && m.uv.top <= 1 + eps && m.uv.wall >= -eps, `大廳那張圖沒蓋滿牆上那一帶，邊上是拉長的邊緣像素：${why}`);
   // 2026-10-22 量到背景約是絨布的兩到三成亮；門檻抓四成，再亮就是在跟牌桌搶眼
   assert.ok(m.bandLum < 0.4 * m.feltLum && m.lowerLum < 0.4 * m.feltLum, `背景太亮，跟牌桌搶眼：${why}`);
   assert.strictEqual(m.leftover, 0, why);
@@ -114,10 +126,13 @@ for (const [name, viewport] of Object.entries(VIEWPORTS)) {
 }
 
 const ROOM = path.join('js', 'view', 'room.js');
+const TEXTURES = path.join('js', 'view', 'textures.js');
 const CONTROLS = [
   ['大廳那張圖擺到牆前面', VIEWPORTS.桌機, [[ROOM, 'const BACK_DIST = 60;', 'const BACK_DIST = 5;']], /光點跑到牆前面/],
-  ['大廳那張圖沒畫光點', VIEWPORTS.直式手機, [[ROOM, 'V.textures.paintHall(hall, plan, w, h, VOID);', 'V.textures.paintHall(hall, [], w, h, VOID);']], /光點太少/],
-  ['大廳底色調亮', VIEWPORTS.直式手機, [[ROOM, 'const VOID = 0x0d1215;', 'const VOID = 0x5a6468;']], /背景太亮/],
+  ['大廳那張圖沒貼上', VIEWPORTS.直式手機, [[TEXTURES, 't.image = art.lobby; t.needsUpdate = true;', '']], /光點太少/],
+  ['大廳那張圖寬度一律整張塞進畫面', VIEWPORTS.直式手機, [[ROOM, 'lobby.repeat.set(W / k / iw,', 'lobby.repeat.set(1,']], /拉變形/],
+  ['大廳那張圖整張塞進來（倍率取小的）', VIEWPORTS.直式手機, [[ROOM, 'const k = Math.max(W / iw, band / (line * ih));', 'const k = Math.min(W / iw, band / (line * ih));']], /沒蓋滿/],
+  ['大廳那張圖沒壓暗', VIEWPORTS.直式手機, [[ROOM, 'const DIM = 0x555555;', 'const DIM = 0xffffff;']], /背景太亮/],
   ['牆加高到擋住大廳', VIEWPORTS.桌機, [[ROOM, 'WALL_H = 1.3', 'WALL_H = 6']], /留給大廳的不到畫面一成/],
 ];
 for (const [name, viewport, edits, expect] of CONTROLS) {

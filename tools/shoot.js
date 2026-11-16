@@ -2,6 +2,7 @@
 // 用法：node tools/shoot.js [檔名前綴]           桌機 1280×720 與手機 390×844 各一張
 //       node tools/shoot.js [檔名前綴] --dealer  荷官五種表情各一張（桌機），外加手機一張
 //       node tools/shoot.js [檔名前綴] --round   照正常速度打一局，桌機與手機各截四個時間點
+//       node tools/shoot.js [檔名前綴] --cards   J、Q、K 與牌背、籌碼的貼圖原寸排一張，中間一排縮成手機上一張牌的大小
 //       以上都可以再加 --classic，改用舊版荷官造型
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +24,28 @@ const args = process.argv.slice(2);
 const prefix = args.find(a => !a.startsWith('--')) || 'shot';
 const dealerMode = args.includes('--dealer');
 const roundMode = args.includes('--round');
+const cardsMode = args.includes('--cards');
+
+// --cards：直接拿 textures.js 畫好的畫布排成一張。中間那排照手機上一張牌約 55 CSS 像素、畫布密度 2 縮成 110 寬；
+// 那是 canvas 縮圖不是 GPU 取樣，只拿來看角標讀不讀得出來
+const CARD_SHEET = `(async () => {
+  await BJK.view.stage.dealer.ready;
+  const T = BJK.view.textures, list = [['K', 'H'], ['Q', 'D'], ['J', 'H'], ['K', 'S'], ['Q', 'C'], ['J', 'S'], ['A', 'S'], ['10', 'D']];
+  const faces = list.map(([r, s]) => T.cardFace(r, s).image), back = T.cardBack().image;
+  const chips = BJK.view.chips.DENOMS.map(v => T.chipAtlas(v).image);
+  const gap = 12, small = 110, smallH = Math.round(small * 358 / 256), c = document.createElement('canvas');
+  c.width = gap + (256 + gap) * list.length;
+  c.height = gap * 4 + 358 + smallH + 358;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0b6e4f'; ctx.fillRect(0, 0, c.width, c.height);
+  faces.forEach((f, i) => ctx.drawImage(f, gap + i * (256 + gap), gap));
+  const y2 = gap * 2 + 358;
+  [...faces, back].forEach((f, i) => ctx.drawImage(f, gap + i * (small + gap), y2, small, smallH));
+  const y3 = y2 + smallH + gap;
+  ctx.drawImage(back, gap, y3);
+  chips.forEach((f, i) => ctx.drawImage(f, gap + (i + 1) * (256 + gap), y3));
+  return c.toDataURL('image/png');
+})()`;
 
 // --round：照正常速度打一局，下注、輪到你、結算、回到下注各截一張（輪到你時按停牌）
 async function shootRound(browser, url, viewport, tag) {
@@ -65,6 +88,16 @@ const jobs = dealerMode
   fs.mkdirSync(OUT, { recursive: true });
   const browser = availableBrowsers()[0];
   const url = pathToFileURL(path.join(__dirname, '..', 'app', 'index.html')).href;
+  if (cardsMode) {
+    const file = path.join(OUT, `${prefix}-cards.png`);
+    const r = await withPage(browser, DESKTOP, async page => {
+      await page.goto(url);
+      fs.writeFileSync(file, Buffer.from((await page.evaluate(CARD_SHEET)).split(',')[1], 'base64'));
+    });
+    console.log(`✔ ${path.relative(process.cwd(), file)}`);
+    for (const line of r.console) console.log(`  主控台：${line}`);
+    return;
+  }
   if (roundMode) {
     for (const [tag, viewport] of [['desktop', DESKTOP], ['mobile', PHONE]]) {
       const r = await shootRound(browser, url, viewport, tag);

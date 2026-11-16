@@ -122,7 +122,7 @@
     ${at(LAND, 3)} { transform: translateY(-3px); } ${at(LAND, 5)}, 100% { transform: none; } }`;
   document.head.appendChild(Object.assign(document.createElement('style'), { textContent: css }));
 
-  // 籌碼的圖直接拿桌上籌碼的頂面貼圖（textures.js 用 canvas 畫的），面額顏色跟桌上一樣
+  // 籌碼的圖直接拿桌上籌碼的頂面貼圖（textures.js 在插畫上寫面額），跟桌上的一樣。開頁閒著時（rehearse）先轉好，那時插畫已經解碼完
   const chipUrls = {};
   function chipUrl(value) {
     if (!chipUrls[value]) chipUrls[value] = V.textures.chipTop(value).image.toDataURL();
