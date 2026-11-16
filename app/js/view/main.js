@@ -111,6 +111,19 @@
       status.scene.fit = inView(camera, pts, 1);
       status.scene.wallTop = room.layout(camera, h);
       status.scene.viewport = [window.innerWidth, window.innerHeight];
+      // 直式畫面：音效、戰績、版本號收進左邊緣的拉頁（style.css），把手放在牆上緣與荷官那條直邊的桌緣中間，
+      // 那一帶的左邊緣是空的牆；上方兩個角落讓給對白泡泡
+      const orient = aspect < 1 ? 'portrait' : 'landscape';
+      if (document.body.dataset.orient !== orient) {
+        const drawer = document.getElementById('drawer');
+        drawer.classList.add('still');
+        document.body.dataset.orient = orient;
+        void drawer.offsetWidth;   // 先在不滑動的狀態下套用新位置，拿掉 class 後才不會補播
+        drawer.classList.remove('still');
+      }
+      // 桌緣取直邊兩端皮革扶手的頂（table.js 的 rail：y 0.04 加管半徑 0.22），比木板高一點，把手不會壓到桌上
+      const wallY = (1 - status.scene.wallTop) / 2 * h, edgeY = project(new THREE.Vector3(0, 0.26, 0)).y;
+      document.body.style.setProperty('--drawer-y', `${Math.round((wallY + edgeY) / 2)}px`);
       render();
       dealer.placeBubble();
       if (director) director.layout();

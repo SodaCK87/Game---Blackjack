@@ -1,4 +1,4 @@
-// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍／分牌。左上角的音效開關也在這裡接
+// 畫面下方的操作列：下注階段疊籌碼、按發牌；輪到你時要牌／停牌／加倍／分牌。音效開關、戰績與直式畫面的拉頁也在這裡接
 (function () {
   const V = window.BJK.view;
 
@@ -60,6 +60,16 @@
     document.addEventListener('pointerdown', e => {
       if (!$('statsPanel').hidden && !$('statsPanel').contains(e.target) && !$('statsBtn').contains(e.target)) closeStats();
     });
+
+    // 直式畫面左邊緣的拉頁：點把手拉出、再點收回；點拉頁外面或按 Esc 也收回。橫式畫面 CSS 不套用，開關的狀態不影響畫面
+    const drawer = $('drawer'), handle = $('drawerHandle');
+    function setDrawer(open) {
+      drawer.dataset.open = String(open);
+      handle.setAttribute('aria-expanded', String(open));
+    }
+    handle.addEventListener('click', () => setDrawer(drawer.dataset.open !== 'true'));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') setDrawer(false); });
+    document.addEventListener('pointerdown', e => { if (drawer.dataset.open === 'true' && !drawer.contains(e.target)) setDrawer(false); });
 
     let soundOn = prefOn('sound');
     function applySound() {

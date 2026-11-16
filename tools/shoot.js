@@ -1,5 +1,5 @@
 // 用無頭 Edge 雙擊開 app/index.html 截圖給人看，輸出在 tools/_shots/（不進版控）
-// 用法：node tools/shoot.js [檔名前綴]           桌機 1280×720 與手機 390×844 各一張
+// 用法：node tools/shoot.js [檔名前綴]           桌機 1280×720 與手機 390×844 各一張，外加矮的直式手機 390×720 拉頁收起、拉開各一張
 //       node tools/shoot.js [檔名前綴] --dealer  荷官五種表情各一張（桌機），外加手機一張
 //       node tools/shoot.js [檔名前綴] --round   照正常速度打一局，桌機與手機各截四個時間點
 //       node tools/shoot.js [檔名前綴] --cards   J、Q、K 與牌背、籌碼的貼圖原寸排一張，中間一排縮成手機上一張牌的大小
@@ -8,10 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('../tests/browser_util');
+const { DRAWER_SETTLED } = require('../tests/ui_util');
 
 const init = process.argv.includes('--classic') ? `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');` : '';
 const DESKTOP = { size: [1280, 720], mobile: false, init };
 const PHONE = { size: [390, 844], mobile: true, init };
+// 矮的直式（BJK-11）：真手機網址列吃掉一截
+const SHORT_PHONE = { size: [390, 720], mobile: true, init };
 const LINES = {
   idle: '歡迎光臨，請下注！',
   deal: '發牌囉。',
@@ -82,7 +85,8 @@ async function shootRound(browser, url, viewport, tag) {
 const jobs = dealerMode
   ? [...Object.keys(LINES).map(mood => ({ name: `dealer-${mood}`, viewport: DESKTOP, mood })),
      { name: 'dealer-mobile', viewport: PHONE, mood: 'smile' }]
-  : [{ name: 'desktop', viewport: DESKTOP }, { name: 'mobile', viewport: PHONE }];
+  : [{ name: 'desktop', viewport: DESKTOP }, { name: 'mobile', viewport: PHONE },
+     { name: 'short', viewport: SHORT_PHONE }, { name: 'short-open', viewport: SHORT_PHONE, open: true }];
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
@@ -114,6 +118,11 @@ const jobs = dealerMode
         await d.ready;
         ${job.mood ? `d.setMood(${JSON.stringify(job.mood)}); d.say(${JSON.stringify(LINES[job.mood])});` : ''}
       })()`);
+      if (job.open) {
+        // 真的點一下左邊的把手，等拉頁的 CSS transition 跑完
+        await page.click(...await page.evaluate(`(() => { const r = document.getElementById('drawerHandle').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`));
+        await page.evaluate(DRAWER_SETTLED);
+      }
       await page.screenshot(file);
     });
     console.log(`✔ ${path.relative(process.cwd(), file)}（${job.viewport.size.join('×')}，${browser}，殘留進程 ${r.leftover}）`);

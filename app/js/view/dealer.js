@@ -184,23 +184,39 @@
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-    // 頭的右邊放得下就放右邊；放不下（直式手機）就放頭頂正上方，免得被夾回來蓋住臉
+    // 頭的右邊放得下就放右邊；放不下（直式手機）就放頭頂正上方；頭頂也放不下（矮的直式手機，頭頂離畫面頂不到一行字），
+    // 改放臉旁邊比較寬的那一側、寬度縮到那一側放得下，字多就多排幾行。不夾回頭頂：那樣會蓋到臉
     function placeBubble() {
       if (bubble.hidden) return;
       const face = faceRect();
-      const w = bubble.offsetWidth, h = bubble.offsetHeight, vw = window.innerWidth, vh = window.innerHeight, gap = 10;
-      let left, top;
-      if (face.right + gap + w <= vw - 8) {
-        left = face.right + gap;
+      const vw = window.innerWidth, vh = window.innerHeight, gap = 10, m = 8;
+      // 先回到 CSS 的寬度上限、擺到左上角再量：擺在右緣附近時瀏覽器會把它擠窄，量到的就不是它本來的寬
+      bubble.style.maxWidth = '';
+      bubble.style.left = '0px';
+      bubble.style.top = '0px';
+      let w = bubble.offsetWidth, h = bubble.offsetHeight, left, top;
+      const beside = side => {
+        left = side === 'right' ? face.right + gap : face.left - gap - w;
         top = face.top + (face.bottom - face.top) * 0.15 - h / 2;
-        bubble.dataset.side = 'right';
-      } else {
+        bubble.dataset.side = side;
+      };
+      if (face.right + gap + w <= vw - m) {
+        beside('right');
+      } else if (face.top - gap - h >= m) {
         left = (face.left + face.right) / 2 - w / 2;
         top = face.top - gap - h;
         bubble.dataset.side = 'top';
+      } else {
+        const room = { right: vw - m - face.right - gap, left: face.left - gap - m };
+        const side = room.left > room.right ? 'left' : 'right';
+        const extra = w - parseFloat(getComputedStyle(bubble).width);   // max-width 只管字那一塊，內距與邊框另外算
+        bubble.style.maxWidth = `${Math.floor(Math.min(room[side], w) - extra)}px`;
+        w = bubble.offsetWidth;
+        h = bubble.offsetHeight;
+        beside(side);
       }
-      bubble.style.left = `${clamp(left, 8, vw - w - 8)}px`;
-      bubble.style.top = `${clamp(top, 8, vh - h - 8)}px`;
+      bubble.style.left = `${clamp(left, m, vw - w - m)}px`;
+      bubble.style.top = `${clamp(top, m, vh - h - m)}px`;
     }
 
     function show(text) {

@@ -1,4 +1,4 @@
-// 守畫面上的字：勝率提示只用翻開的牌、疊在一起的標籤會讓位、角落的版本號與載不起來的說明（BJK-03）、牌局中途出錯的說明（BJK-10）、
+// 守畫面上的字：勝率提示只用翻開的牌、疊在一起的標籤會讓位、版本號（直式手機收在左邊的拉頁裡）與載不起來的說明（BJK-03）、牌局中途出錯的說明（BJK-10）、
 // 大特效的大字不蓋臉（BJK-04）、分 A 兩手 Blackjack 只播一次（BJK-05）、荷官的表情與籌碼數字跟著結算動畫走。
 // 驗不到：真手機、字好不好讀（對比）。
 const test = require('node:test');
@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { APP, DESKTOP, PHONE, SMALL_PHONE, url, first, MEASURE_TURN, pairsOverlapping, copyWith, PLAY_UTIL, LATE_BJ } = require('./ui_util');
+const { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, DRAWER_SETTLED, url, first, MEASURE_TURN, pairsOverlapping, copyWith, PLAY_UTIL, LATE_BJ } = require('./ui_util');
 const { availableBrowsers, withPage } = require('./browser_util');
 const { rigInit, deal } = require('./rig_util');
 
@@ -177,7 +177,10 @@ test('陽性對照：讓位只算不移，疊在同一點的標籤要判成重�
 
 // 盤點 D-04：角落的版本號；BJK-03：載不起來時畫面要說原因，不能只剩暗底與「籌碼 0」
 const { BJK_VER } = require('../app/js/core/version.js');
-const SCREEN = `(() => {
+// 直式畫面的版本號收在左邊的拉頁裡（BJK-11）：看得到把手就先拉開、等它滑出來再讀
+const SCREEN = `(async () => {
+  const handle = document.getElementById('drawerHandle');
+  if (handle.offsetWidth) { handle.click(); await ${DRAWER_SETTLED}; }
   const v = document.getElementById('ver').getBoundingClientRect();
   return { text: document.body.innerText, ver: { left: v.left, right: v.right, top: v.top, bottom: v.bottom },
            vw: innerWidth, vh: innerHeight, hud: getComputedStyle(document.getElementById('hud')).display };
@@ -235,8 +238,8 @@ function assertMidRound(m) {
 }
 
 for (const browser of availableBrowsers()) {
-  test(`${browser}：桌機與手機的畫面角落都看得到版本號，正常載入時不出現「載不起來」`, async () => {
-    for (const vp of [DESKTOP, PHONE]) {
+  test(`${browser}：桌機的右上角、直式手機左邊的拉頁裡都看得到版本號，正常載入時不出現「載不起來」`, async () => {
+    for (const vp of [DESKTOP, PHONE, SHORT_PHONE]) {
       const r = await screenOf(browser, vp, APP), m = r.value, why = `${vp.size.join('×')}：${JSON.stringify(m.ver)}`;
       assert.ok(m.text.includes(`v${BJK_VER}`), `畫面上找不到 v${BJK_VER}：${why}`);
       assert.ok(m.ver.left >= 0 && m.ver.right <= m.vw && m.ver.top >= 0 && m.ver.bottom <= m.vh, `版本號跑出畫面：${why}`);

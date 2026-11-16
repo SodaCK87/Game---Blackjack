@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { APP, DESKTOP, PHONE, url, first, copyWith, PLAY_UTIL } = require('./ui_util');
+const { APP, DESKTOP, PHONE, DRAWER_SETTLED, url, first, copyWith, PLAY_UTIL } = require('./ui_util');
 const { withPage } = require('./browser_util');
 const { rigInit, deal } = require('./rig_util');
 
@@ -19,6 +19,9 @@ const PLAY = button => `(async () => {${PLAY_UTIL}
 })()`;
 const PANEL = `(async () => {
   await BJK.view.stage.dealer.ready;
+  // 直式手機的戰績鈕收在左邊的拉頁裡（BJK-11）：照同事的按法先拉開
+  const handle = document.getElementById('drawerHandle');
+  if (handle.offsetWidth) { handle.click(); await ${DRAWER_SETTLED}; }
   document.getElementById('statsBtn').click();
   const p = document.getElementById('statsPanel'), r = p.getBoundingClientRect();
   const rows = Object.fromEntries([...p.querySelectorAll('dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]));

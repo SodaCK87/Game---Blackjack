@@ -12,6 +12,12 @@ const APP = path.join(__dirname, '..', 'app');
 const DESKTOP = { size: [1280, 720], mobile: false };
 const PHONE = { size: [390, 844], mobile: true };
 const SMALL_PHONE = { size: [360, 640], mobile: true };
+// 矮的直式（BJK-11）：真手機的網址列吃掉一截，比 PHONE 矮很多
+const SHORT_PHONE = { size: [390, 720], mobile: true };
+const PHONE_LANDSCAPE = { size: [844, 390], mobile: true };
+// 等左邊拉頁的 CSS transition 真的跑完（含收回時延後藏起來那一段）：固定等幾百毫秒不夠，
+// 全套平行跑、機器忙時滑到一半就讀到位置（2026-11-16 量到版本號 left -3.5）
+const DRAWER_SETTLED = `Promise.all(document.getElementById('drawer').getAnimations({ subtree: true }).map(a => a.finished.catch(() => {}))).then(() => true)`;
 const url = dir => pathToFileURL(path.join(dir, 'index.html')).href;
 const first = () => availableBrowsers()[0];
 
@@ -91,4 +97,4 @@ const shownOf = b => Object.fromEntries(Object.entries(b).map(([k, x]) => [k, [x
 // 21 點平手退回加倍後的注（籌碼回到 1,000），同桌三位 19 點輸
 const LATE_BJ = rigInit(['10', '5', '10', '10', 'A', '9', '6', '9', '9', 'K', 'K']);
 
-module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };
+module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_SETTLED, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };

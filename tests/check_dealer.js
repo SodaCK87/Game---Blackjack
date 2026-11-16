@@ -1,5 +1,6 @@
 // 守荷官：預設造型的點陣插畫每種表情立牌貼的是自己那張、臉框量在臉上（產出檔本身由 check_dealer_art.js 守）；
-// 對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊，講到一半換表情也一樣；
+// 對白泡泡在桌機與直式手機（含矮的直式，BJK-11）都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊，講到一半換表情也一樣，
+// 也不跟看得到的按鈕、拉頁把手、版本號疊在一起；
 // 舊版造型五種表情都只有兩隻手（BJK-01）；點荷官換造型；大特寫跟著造型；橫式畫面插畫荷官放大 1.2 倍而框景不變。
 // 驗不到：插畫好不好看、裁得好不好（看 node tools/shoot.js <前綴> --dealer 與 tools/_shots/art-<表情>-marks.png）。
 const test = require('node:test');
@@ -15,7 +16,11 @@ const APP = path.join(__dirname, '..', 'app');
 const DESKTOP = { size: [1280, 720], mobile: false };
 const PHONE = { size: [390, 844], mobile: true };
 const PHONE_LANDSCAPE = { size: [844, 390], mobile: true };
+// 矮的直式（BJK-11）：真手機網址列吃掉一截，頭頂離畫面頂放不下一行字
+const SHORT_PHONE = { size: [390, 720], mobile: true };
+const SMALL_PHONE = { size: [360, 640], mobile: true };
 const LONG = '這一局荷官的明牌是 A，我先偷看一下底牌，請稍等。';
+const SHORT = '發牌囉。';
 const MOODS = ['idle', 'deal', 'surprised', 'smile', 'sorry'];
 
 const SAVED_CLASSIC = `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');`;
@@ -30,6 +35,12 @@ function loadArt() {
 }
 
 // ---- 對白泡泡 ----
+// 畫面上看得到的按鈕、拉頁把手、版本號：收在拉頁裡（看不到、或在畫面外）的不算
+const UI = `[...document.querySelectorAll('#drawerHandle, #soundToggle, #statsBtn, #ver')].map(el => {
+  const r = el.getBoundingClientRect();
+  return { id: el.id, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+           shown: getComputedStyle(el).visibility === 'visible' && r.width > 0 && r.right > 0 && r.left < innerWidth };
+}).filter(u => u.shown)`;
 async function measure(browser, appDir, viewport) {
   const r = await withPage(browser, viewport, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
@@ -39,7 +50,7 @@ async function measure(browser, appDir, viewport) {
       d.say(${JSON.stringify(LONG)});
       const b = document.getElementById('bubble').getBoundingClientRect();
       return { bubble: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
-               face: d.faceRect(), vw: innerWidth, vh: innerHeight };
+               face: d.faceRect(), vw: innerWidth, vh: innerHeight, ui: ${UI} };
     })()`);
   });
   return { ...r.value, console: r.console };
@@ -60,6 +71,7 @@ function assertBubble(m) {
   assert.ok(m.bubble.left >= 0 && m.bubble.top >= 0 && m.bubble.right <= m.vw && m.bubble.bottom <= m.vh, `泡泡超出畫面：${why}`);
   assert.ok(!overlaps(m.bubble, m.face), `泡泡蓋到荷官的臉：${why}`);
   assert.ok(gap(m.bubble, m.face) < 40, `泡泡離荷官的臉太遠，看不出是誰在講話：${why}`);
+  assert.deepStrictEqual(m.ui.filter(u => overlaps(m.bubble, u)).map(u => u.id), [], `泡泡跟按鈕、把手或版本號疊在一起：${why}`);
   if (m.console) assert.deepStrictEqual(m.console, []);
 }
 
@@ -77,7 +89,7 @@ function brokenCopy(edits) {
 }
 
 for (const browser of availableBrowsers()) {
-  for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE], ['橫式手機', PHONE_LANDSCAPE]]) {
+  for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE], ['矮的直式手機', SHORT_PHONE], ['小的直式手機', SMALL_PHONE], ['橫式手機', PHONE_LANDSCAPE]]) {
     test(`${browser}：${name}的長句泡泡在畫面內、貼著荷官的臉但不蓋住`, async () => {
       assertBubble(await measure(browser, APP, vp));
     });
@@ -88,7 +100,7 @@ for (const browser of availableBrowsers()) {
 }
 
 test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的泡泡要判成蓋到臉', async () => {
-  const tmp = brokenCopy([[DEALER_JS, 'if (face.right + gap + w <= vw - 8) {', 'if (true) {']]);
+  const tmp = brokenCopy([[DEALER_JS, 'if (face.right + gap + w <= vw - m) {', 'if (true) {']]);
   try {
     const m = await measure(availableBrowsers()[0], tmp, PHONE);
     assert.ok(overlaps(m.bubble, m.face), `破壞後泡泡仍沒蓋到臉，這條判準沒在分辨：${JSON.stringify(m)}`);
@@ -97,15 +109,20 @@ test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的�
   }
 });
 
-// 插畫每種表情的頭擺在不同地方（驚訝偏右、遺憾偏低）：五種表情各講一次；再在遺憾時講、講到一半換成發牌
+// 插畫每種表情的頭擺在不同地方（驚訝偏右、遺憾偏低）：五種表情各講一次長句、一次短句；再在遺憾時講、講到一半換成發牌
 const EACH_MOOD = `(async () => {
   const d = BJK.view.stage.dealer;
   await d.ready;
   const box = () => { const b = document.getElementById('bubble').getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+  const snap = () => ({ bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight, ui: ${UI} });
   const out = {};
-  for (const m of Object.keys(BJK.view.dealer.MOODS)) { d.setMood(m); d.say(${JSON.stringify(LONG)}); out[m] = { bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight }; }
+  for (const m of Object.keys(BJK.view.dealer.MOODS)) {
+    d.setMood(m);
+    d.say(${JSON.stringify(LONG)}); out[m] = snap();
+    d.say(${JSON.stringify(SHORT)}); out[m + '・短句'] = snap();
+  }
   d.setMood('sorry'); d.say(${JSON.stringify(LONG)}); d.setMood('deal');
-  out['遺憾講到一半換成發牌'] = { bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight };
+  out['遺憾講到一半換成發牌'] = snap();
   return out;
 })()`;
 const eachMood = (appDir, vp) => withPage(availableBrowsers()[0], vp, async page => {
@@ -113,14 +130,36 @@ const eachMood = (appDir, vp) => withPage(availableBrowsers()[0], vp, async page
   return page.evaluate(EACH_MOOD);
 });
 
-for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE]]) {
-  test(`${availableBrowsers()[0]}：${name}五種表情各自的泡泡都不蓋臉，講到一半換表情也跟著讓開`, async () => {
+for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE], ['矮的直式手機', SHORT_PHONE], ['小的直式手機', SMALL_PHONE]]) {
+  test(`${availableBrowsers()[0]}：${name}五種表情、長句短句的泡泡都不蓋臉、不疊到按鈕，講到一半換表情也跟著讓開`, async () => {
     const r = await eachMood(APP, vp);
-    assert.strictEqual(Object.keys(r.value).length, 6);
+    assert.strictEqual(Object.keys(r.value).length, 11);
     for (const [k, m] of Object.entries(r.value)) assert.doesNotThrow(() => assertBubble(m), `${k}：${JSON.stringify(m)}`);
     assert.deepStrictEqual(r.console, []);
   });
 }
+
+// BJK-11 的兩半：頭頂放不下時夾回頂端（v0.21.0 的做法）會蓋到臉；按鈕與版本號留在上方兩個角落（v0.21.0 的版面）會跟泡泡疊在一起
+test('陽性對照：頭頂放不下時照舊夾回畫面頂端，矮的直式手機上要判成蓋到臉', async () => {
+  const tmp = brokenCopy([[DEALER_JS, '} else if (face.top - gap - h >= m) {', '} else if (true) {']]);
+  try {
+    const r = (await eachMood(tmp, SHORT_PHONE)).value;
+    assert.ok(Object.values(r).some(m => overlaps(m.bubble, m.face)), `破壞後泡泡仍沒蓋到臉，這條判準沒在分辨：${JSON.stringify(r)}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：直式畫面不收拉頁、按鈕與版本號留在上方兩個角落，矮的直式手機上要判成疊到泡泡', async () => {
+  const tmp = brokenCopy([[path.join('js', 'view', 'main.js'), "const orient = aspect < 1 ? 'portrait' : 'landscape';", "const orient = 'landscape';"]]);
+  try {
+    const r = (await eachMood(tmp, SHORT_PHONE)).value;
+    const hits = Object.values(r).flatMap(m => m.ui.filter(u => overlaps(m.bubble, u)).map(u => u.id));
+    assert.ok(hits.includes('soundToggle') || hits.includes('statsBtn'), `破壞後泡泡仍沒疊到按鈕：${JSON.stringify(r)}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('陽性對照：換表情時泡泡不重擺，桌機上要判成遺憾換成發牌時蓋到臉', async () => {
   const tmp = brokenCopy([[DEALER_JS, '        onChange();\n      }\n      placeBubble();\n', '        onChange();\n      }\n']]);

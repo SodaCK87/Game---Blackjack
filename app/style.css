@@ -168,6 +168,103 @@ html, body {
   display: none;
 }
 
+/* 直式畫面（main.js 排版時標 data-orient）：上方兩個角落是荷官對白泡泡的位置，矮的手機上泡泡只能擠在那一帶，
+   所以音效、戰績、版本號收進左邊緣的拉頁，只露一個把手。把手的高度由 main.js 算（牆上緣與荷官那條直邊的中間，
+   那一帶左邊緣是空的牆）。滑出用 CSS transition：只動這一層，不碰牌桌的 WebGL 畫布，也不開 JS 動畫 */
+#drawerHandle {
+  display: none;
+}
+
+body[data-orient="portrait"] #drawer {
+  --handle-w: 34px;
+  position: fixed;
+  left: 0;
+  top: var(--drawer-y, 50%);
+  display: flex;
+  align-items: center;
+  transform: translate(calc(-100% + var(--handle-w)), -50%);
+  transition: transform 0.2s ease-out;
+}
+
+body[data-orient="portrait"] #drawer[data-open="true"] {
+  transform: translate(0, -50%);
+}
+
+/* 收起時整條看不到也點不到（鍵盤 Tab 不會跳進畫面外的按鈕）；收回時等滑完才藏 */
+body[data-orient="portrait"] #drawerPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+  border: 2px solid var(--teal);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: rgba(33, 44, 49, 0.94);
+  box-shadow: 2px 3px 10px rgba(0, 0, 0, 0.45);
+  visibility: hidden;
+  transition: visibility 0s linear 0.2s;
+}
+
+body[data-orient="portrait"] #drawer[data-open="true"] #drawerPanel {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+body[data-orient="portrait"] #soundToggle,
+body[data-orient="portrait"] #statsBtn,
+body[data-orient="portrait"] #ver {
+  position: static;
+}
+
+body[data-orient="portrait"] #soundToggle,
+body[data-orient="portrait"] #statsBtn {
+  width: 44px;
+  height: 44px;
+  padding: 9px;
+}
+
+body[data-orient="portrait"] #ver {
+  padding: 1px 4px;
+}
+
+body[data-orient="portrait"] #drawerHandle {
+  display: block;
+  box-sizing: border-box;
+  width: var(--handle-w);
+  height: 56px;
+  margin-left: -2px;
+  padding: 0 5px 0 3px;
+  border: 2px solid var(--teal);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: rgba(33, 44, 49, 0.88);
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.45);
+  color: var(--cream);
+  cursor: pointer;
+}
+
+#drawerHandle svg {
+  display: block;
+  width: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.2s ease-out;
+}
+
+#drawer[data-open="true"] #drawerHandle svg {
+  transform: scaleX(-1);
+}
+
+/* 開頁第一次排版、手機轉方向那一下：main.js 先加上這個 class 再拿掉，拉頁直接落在收起的位置，不會開頁就看到它滑走 */
+#drawer.still,
+#drawer.still * {
+  transition: none !important;
+}
+
 /* 載不起來時的說明：操作列一起藏掉，免得同事以為按了會動 */
 #fatal {
   position: fixed;
@@ -260,7 +357,8 @@ html, body {
 
 body[data-fatal] #hud,
 body[data-fatal] #statsBtn,
-body[data-fatal] #soundToggle {
+body[data-fatal] #soundToggle,
+body[data-fatal] #drawerHandle {
   display: none;
 }
 
@@ -570,6 +668,12 @@ body[data-fatal] #soundToggle {
   left: -8px;
   top: calc(50% - 7px);
   transform: rotate(45deg);
+}
+
+.bubble[data-side="left"]::after {
+  right: -8px;
+  top: calc(50% - 7px);
+  transform: rotate(-135deg);
 }
 
 .bubble[data-side="top"]::after {
