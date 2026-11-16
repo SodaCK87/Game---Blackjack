@@ -1,6 +1,6 @@
 // 守荷官：預設造型的點陣插畫每種表情立牌貼的是自己那張、臉框量在臉上（產出檔本身由 check_dealer_art.js 守）；
 // 對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊，講到一半換表情也一樣；
-// 舊版造型五種表情都只有兩隻手（BJK-01）；點荷官換造型；大特寫跟著造型。
+// 舊版造型五種表情都只有兩隻手（BJK-01）；點荷官換造型；大特寫跟著造型；橫式畫面插畫荷官放大 1.2 倍而框景不變。
 // 驗不到：插畫好不好看、裁得好不好（看 node tools/shoot.js <前綴> --dealer 與 tools/_shots/art-<表情>-marks.png）。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -234,6 +234,62 @@ function assertClassicArms(arms) {
     assert.strictEqual(a.right, mood === 'deal' ? 0 : 255, mood === 'deal' ? `發牌時右袖還垂著，多一隻手：${why}` : `${mood}：右袖不見了：${why}`);
   }
 }
+
+// ---- 橫式畫面放大插畫荷官（v0.21.0，使用者 2026-11-16 要 1.2 倍、裁掉下半身）----
+// 臉框在畫面上的高度，跟同一頁關掉放大（setLandscape(false)）時比；鏡頭位置跟「插畫不放大」的複本比，框景不准因此變
+const ZOOM = `(async () => {
+  const s = BJK.view.stage, d = s.dealer; await d.ready;
+  const h = () => { const f = d.faceRect(); return f.bottom - f.top; };
+  const zoomed = h();
+  d.setLandscape(false);
+  const plain = h();
+  return { ratio: +(zoomed / plain).toFixed(3), face: Math.round(zoomed), cam: s.camera.position.toArray() };
+})()`;
+const zoomOf = (appDir, vp) => withPage(availableBrowsers()[0], vp, async page => {
+  await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
+  return page.evaluate(ZOOM);
+});
+const NO_ZOOM = [path.join('js', 'view', 'dealer.js'), 'zoom: 1.2,', 'zoom: 1,'];
+function assertZoom(desk, phone) {
+  const why = JSON.stringify({ desk, phone });
+  assert.ok(Math.abs(desk.ratio - 1.2) < 0.02, `桌機的荷官沒放大 1.2 倍：${why}`);
+  assert.strictEqual(phone.ratio, 1, `直式手機的荷官也被放大了：${why}`);
+}
+const sameCam = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+
+test(`${availableBrowsers()[0]}：桌機的插畫荷官放大 1.2 倍、鏡頭框景跟不放大時一樣，直式手機不放大`, async t => {
+  const tmp = brokenCopy([NO_ZOOM]);
+  try {
+    const desk = (await zoomOf(APP, DESKTOP)).value, phone = (await zoomOf(APP, PHONE)).value, plain = (await zoomOf(tmp, DESKTOP)).value;
+    t.diagnostic(`桌機待機頭頂到下巴 ${desk.face} 像素（${desk.ratio} 倍）；直式手機 ${phone.ratio} 倍`);
+    assertZoom(desk, phone);
+    assert.ok(sameCam(desk.cam, plain.cam), `放大後鏡頭換了位置，整桌會變小：${JSON.stringify({ desk: desk.cam, plain: plain.cam })}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：排版時不告訴荷官畫面是橫的，要判成桌機沒放大', async () => {
+  const tmp = brokenCopy([[path.join('js', 'view', 'main.js'), 'dealer.setLandscape(aspect >= 1);', 'dealer.setLandscape(false);']]);
+  try {
+    const desk = (await zoomOf(tmp, DESKTOP)).value, phone = (await zoomOf(tmp, PHONE)).value;
+    assert.throws(() => assertZoom(desk, phone), /桌機的荷官沒放大/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：改用整個立牌放大 1.2 倍，要判成鏡頭換了位置', async () => {
+  const plainDir = brokenCopy([NO_ZOOM]);
+  const tmp = brokenCopy([NO_ZOOM, [path.join('js', 'view', 'main.js'), 'dealer.mesh.scale.setScalar(aspect < 1 ? 2.2 : 1);', 'dealer.mesh.scale.setScalar(aspect < 1 ? 2.2 : 1.2);']]);
+  try {
+    const scaled = (await zoomOf(tmp, DESKTOP)).value, plain = (await zoomOf(plainDir, DESKTOP)).value;
+    assert.ok(!sameCam(scaled.cam, plain.cam), JSON.stringify({ scaled: scaled.cam, plain: plain.cam }));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  }
+});
 
 test('舊版造型：五種表情都只有兩隻手', async () => {
   assertClassicArms(await measureArms(APP));

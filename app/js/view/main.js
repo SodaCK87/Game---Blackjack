@@ -90,8 +90,10 @@
       const elev = (aspect < 1 ? 64 : 40) * Math.PI / 180;
       const dir = new THREE.Vector3(0, Math.sin(elev), Math.cos(elev));
       V.dealer.face(dealer.mesh, elev);
-      // 直式螢幕是寬度先頂到：牌桌大小已經定了，上方多出來的高度讓荷官放大來撐
+      // 直式螢幕是寬度先頂到：牌桌大小已經定了，上方多出來的高度讓荷官放大來撐。
+      // 橫式時插畫荷官照造型放大、裁掉下半身（dealer.js 的 LOOKS[].zoom），立牌只變寬、頂端不動，框景不受影響
       dealer.mesh.scale.setScalar(aspect < 1 ? 2.2 : 1);
+      dealer.setLandscape(aspect >= 1);
       // 直式螢幕俯角大，立牌底邊會從桌子後面露出來，往前貼近桌邊才藏得住
       dealer.mesh.position.z = aspect < 1 ? -0.4 : -0.6;
       scene.updateMatrixWorld();

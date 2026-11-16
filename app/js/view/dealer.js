@@ -27,6 +27,8 @@
           `<rect class="face" x="${x0}" y="${y0}" width="${+(x1 - x0).toFixed(1)}" height="${+(y1 - y0).toFixed(1)}" fill="none"/></svg>`;
       },
       line: '這身才夠氣勢。',
+      // 橫式畫面放大幾倍、裁掉下半身：到腰的半身像整張塞進立牌，桌機上臉太小（使用者 2026-11-16 要 1.2 倍）
+      zoom: 1.2,
     },
     // 舊版：SVG 畫的，臉框是橢圓，往上多留 20 給頭髮
     classic: {
@@ -34,6 +36,8 @@
       head: () => { const { cx, cy, rx, ry } = CLASSIC.head; return [cx - rx, cy - ry - 20, cx + rx, cy + ry]; },
       portrait: mood => classicSvg(mood, `width="100%" height="100%" viewBox="${CLASSIC.crop}"`),
       line: CLASSIC.line,
+      // 舊版的頭在立牌偏下，頭頂對齊放大的話整個人往下沉，肩膀躲到籌碼架後面只剩一顆頭
+      zoom: 1,
     },
   };
   const LOOK_NAMES = Object.keys(LOOKS);
@@ -58,18 +62,27 @@
   }
   const loadLook = name => Promise.all(Object.keys(MOODS).map(m => loadTexture(m, name).then(t => [m, t]))).then(Object.fromEntries);
 
-  // 立牌座標 → 立牌本地座標（原點在立牌底邊中央）
-  function local(sx, sy) {
-    return new THREE.Vector3((sx / VB_W - 0.5) * W, (1 - sy / VB_H) * H, 0);
+  // 立牌座標 → 立牌本地座標（原點在立牌底邊中央）。zoom 見 standee()
+  function local(sx, sy, zoom = 1) {
+    return new THREE.Vector3((sx / VB_W - 0.5) * W * zoom, (1 - sy / VB_H * zoom) * H, 0);
+  }
+
+  // 立牌的幾何。zoom > 1：人放大 zoom 倍、頭頂對齊，下半身從底邊裁掉（貼圖只取上面 1／zoom）；
+  // 立牌只變寬、高與頂端不動，桌機照「牌桌加荷官」框景時鏡頭不會因此拉遠
+  function standee(zoom) {
+    const g = new THREE.PlaneGeometry(W * zoom, H);
+    g.translate(0, H / 2, 0);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (1 - uv.getY(i)) / zoom);
+    return g;
   }
 
   // project(世界座標) → 螢幕 CSS 像素 {x, y}；onChange() 讓場景重畫
   function create({ bubble, project, onChange }) {
-    const geometry = new THREE.PlaneGeometry(W, H);
-    geometry.translate(0, H / 2, 0);
+    let zoom = 1, landscape = false;
     // 不寫深度：前面的牌與籌碼已經先畫好，擋得住；跟桌上其他透明物共用一支著色器
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false });
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(standee(zoom), material);
     mesh.renderOrder = 1;
     let textures = {};
     let masks = {};
@@ -99,6 +112,7 @@
         textures = set;
         masks = {};
         look = name;
+        applyZoom();
         material.map = textures[mood];
         V.hud.savePref('look', name);
         aside(LOOKS[name].line);
@@ -142,7 +156,23 @@
 
     function toScreen(sx, sy) {
       mesh.updateMatrixWorld();
-      return project(mesh.localToWorld(local(sx, sy)));
+      return project(mesh.localToWorld(local(sx, sy, zoom)));
+    }
+
+    // 橫式畫面照造型的 zoom 放大裁掉下半身；直式手機整張（那裡靠 mesh.scale 撐滿上方）。換造型時跟著重建。
+    // 點透明處的判斷讀的是貼圖 UV，不必跟著改
+    function applyZoom() {
+      const z = landscape ? LOOKS[look].zoom : 1;
+      if (z === zoom) return;
+      zoom = z;
+      const old = mesh.geometry;
+      mesh.geometry = standee(z);
+      old.dispose();
+    }
+    // main.js 每次排版時給：畫面是不是橫的
+    function setLandscape(on) {
+      landscape = on;
+      applyZoom();
     }
 
     function faceRect() {
@@ -207,7 +237,8 @@
     }
 
     return {
-      mesh, ready, setMood, say, hush, placeBubble, faceRect, nextLook, opaque,
+      mesh, ready, setMood, say, hush, placeBubble, faceRect, nextLook, opaque, setLandscape,
+      get zoom() { return zoom; },
       get look() { return look; },
       get mood() { return mood; },
       get loaded() { return Object.keys(textures).length; },
