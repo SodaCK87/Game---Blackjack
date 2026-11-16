@@ -313,7 +313,7 @@ const WATCH = `
   const at = text => seen.find(x => x.t.startsWith(text));`;
 
 // BJK-04 的用意是大字不蓋住荷官的臉。v0.12.0 起拿 Blackjack 改播大特效（showcase.js），特效本身就有荷官的大特寫，所以兩張臉都量：
-// 大特寫裡的五官（dealer.js 的 g.face：眉毛、眼睛、鼻子到嘴，表情都在這裡）與畫面上原本荷官的臉（faceRect()）。
+// 大特寫裡的五官（.face：插畫是 dealer_art.js 量的五官框，舊版是 SVG 的 g.face；眉毛、眼睛到嘴，表情都在這裡）與畫面上原本荷官的臉（faceRect()）。
 // 大標落定（39%）到播完，每 3% 暫停一次：大標與副標看得到的字（fx_util 的 inkQuad）不准碰到任一張臉，也不准跑出畫面。
 // 大頭框的下緣、下巴與脖子讓大標壓著，那是定案的樣子
 const { FX_SEEK, FX_INK, quadHitsRect } = require('./fx_util');
@@ -361,13 +361,17 @@ test(`${first()}：Blackjack 大特效的大字，在桌機、直式與橫式手
   }
 });
 
-test('陽性對照：大標放回大特寫正中央，手機上要判成壓到五官與荷官的臉', async () => {
-  const tmp = copyWith(path.join('js', 'view', 'showcase.js'), 'top: calc(40% + ${FACE} / 2 - 0.25em)', 'top: calc(40% - 0.5em)');
-  try {
-    const problems = faceProblems((await fxFace(PHONE, tmp)).value);
-    assert.ok(problems.some(p => /壓到大特寫的五官/.test(p)) && problems.some(p => /壓到畫面上荷官的臉/.test(p)), problems.slice(0, 4).join('｜'));
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+// v0.20.0 換成插畫荷官後，畫面上荷官的臉在直式手機上比大特寫的中央高（頭頂到下巴約 155～300 px），
+// 大標放回正中央只壓到五官，所以「壓到畫面上荷官的臉」另外把大標拉到臉的高度（畫面高的 18%）來對照
+test('陽性對照：手機上大標放回大特寫正中央要判成壓到五官，拉到荷官臉的高度要判成壓到荷官的臉', async () => {
+  for (const [to, want] of [['top: calc(40% - 0.5em)', /壓到大特寫的五官/], ['top: 18%', /壓到畫面上荷官的臉/]]) {
+    const tmp = copyWith(path.join('js', 'view', 'showcase.js'), 'top: calc(40% + ${FACE} / 2 - 0.25em)', to);
+    try {
+      const problems = faceProblems((await fxFace(PHONE, tmp)).value);
+      assert.ok(problems.some(p => want.test(p)), `${to}：${problems.slice(0, 4).join('｜')}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   }
 });
 

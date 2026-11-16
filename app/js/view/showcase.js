@@ -13,8 +13,8 @@
     dealer: { mood: 'smile', title: 'BLACKJACK', sub: '莊家通殺！', theme: 'red' },
   };
 
-  // 荷官的臉直接拿 dealer.js 畫立牌的那張 SVG，只裁到頭肩，表情跟桌上一模一樣。
-  // 直接嵌進頁面、不轉成圖檔：探針才量得到五官（g.face）實際畫在畫面哪裡
+  // 荷官的臉直接拿 dealer.js 立牌用的那張圖，只裁到頭肩，造型與表情跟桌上一模一樣。
+  // 用 SVG 嵌進頁面：探針才量得到五官（.face）實際在畫面哪裡
   const faceSvg = mood => V.dealer.portrait(mood);
 
   // 尺寸多夾一個 vh：橫拿的手機（844×390）照原型的大小，副標會掉出畫面底下。桌機 1280×720 與直式 390×844 算出來跟原型一樣

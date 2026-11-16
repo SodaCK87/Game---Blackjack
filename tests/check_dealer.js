@@ -1,10 +1,13 @@
-// 守荷官：立牌與大特寫用烘焙過光影的圖、而且跟 SVG 畫法同步；對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊；五種表情都只有兩隻手（BJK-01）；點荷官換造型。
-// 驗不到：表情畫得好不好看（看 node tools/shoot.js <前綴> --dealer 的截圖）。
+// 守荷官：預設造型的點陣插畫每種表情立牌貼的是自己那張、臉框量在臉上（產出檔本身由 check_dealer_art.js 守）；
+// 對白泡泡在桌機與直式手機都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊，講到一半換表情也一樣；
+// 舊版造型五種表情都只有兩隻手（BJK-01）；點荷官換造型；大特寫跟著造型。
+// 驗不到：插畫好不好看、裁得好不好（看 node tools/shoot.js <前綴> --dealer 與 tools/_shots/art-<表情>-marks.png）。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('./browser_util');
 
@@ -13,9 +16,20 @@ const DESKTOP = { size: [1280, 720], mobile: false };
 const PHONE = { size: [390, 844], mobile: true };
 const PHONE_LANDSCAPE = { size: [844, 390], mobile: true };
 const LONG = '這一局荷官的明牌是 A，我先偷看一下底牌，請稍等。';
+const MOODS = ['idle', 'deal', 'surprised', 'smile', 'sorry'];
 
 const SAVED_CLASSIC = `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');`;
+const DEALER_JS = path.join('js', 'view', 'dealer.js');
+const ART_JS = path.join('js', 'view', 'dealer_art.js');
+const VB_W = Number(fs.readFileSync(path.join(APP, DEALER_JS), 'utf8').match(/VB_W = (\d+)/)[1]);
 
+function loadArt() {
+  const window = { BJK: { view: {} } };
+  vm.runInNewContext(fs.readFileSync(path.join(APP, ART_JS), 'utf8'), { window });
+  return window.BJK.view.dealerArt;
+}
+
+// ---- 對白泡泡 ----
 async function measure(browser, appDir, viewport) {
   const r = await withPage(browser, viewport, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
@@ -46,7 +60,7 @@ function assertBubble(m) {
   assert.ok(m.bubble.left >= 0 && m.bubble.top >= 0 && m.bubble.right <= m.vw && m.bubble.bottom <= m.vh, `泡泡超出畫面：${why}`);
   assert.ok(!overlaps(m.bubble, m.face), `泡泡蓋到荷官的臉：${why}`);
   assert.ok(gap(m.bubble, m.face) < 40, `泡泡離荷官的臉太遠，看不出是誰在講話：${why}`);
-  assert.deepStrictEqual(m.console, []);
+  if (m.console) assert.deepStrictEqual(m.console, []);
 }
 
 // edits：[[檔案, 原字串, 換成], …]，在暫存複本上改；沒命中就直接紅
@@ -73,8 +87,6 @@ for (const browser of availableBrowsers()) {
   }
 }
 
-const DEALER_JS = path.join('js', 'view', 'dealer.js');
-
 test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的泡泡要判成蓋到臉', async () => {
   const tmp = brokenCopy([[DEALER_JS, 'if (face.right + gap + w <= vw - 8) {', 'if (true) {']]);
   try {
@@ -85,10 +97,110 @@ test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的�
   }
 });
 
-// 舉起來的那隻手，原本垂著的袖子就不能再畫（使用者 2026-10-22 回報「多了一隻手臂」）。
-// 把每種表情的 SVG 畫到畫布上，讀兩個點的不透明度（SVG 座標）：兩邊垂袖處，舉手那一側要空、另一側要有東西；再數一次手臂有幾組
-const RAISED = { idle: 'left', deal: 'right', surprised: 'left', smile: 'right', sorry: 'right' };
-const ARMS = (look, lx, rx) => `(async () => {
+// 插畫每種表情的頭擺在不同地方（驚訝偏右、遺憾偏低）：五種表情各講一次；再在遺憾時講、講到一半換成發牌
+const EACH_MOOD = `(async () => {
+  const d = BJK.view.stage.dealer;
+  await d.ready;
+  const box = () => { const b = document.getElementById('bubble').getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+  const out = {};
+  for (const m of Object.keys(BJK.view.dealer.MOODS)) { d.setMood(m); d.say(${JSON.stringify(LONG)}); out[m] = { bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight }; }
+  d.setMood('sorry'); d.say(${JSON.stringify(LONG)}); d.setMood('deal');
+  out['遺憾講到一半換成發牌'] = { bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight };
+  return out;
+})()`;
+const eachMood = (appDir, vp) => withPage(availableBrowsers()[0], vp, async page => {
+  await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
+  return page.evaluate(EACH_MOOD);
+});
+
+for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE]]) {
+  test(`${availableBrowsers()[0]}：${name}五種表情各自的泡泡都不蓋臉，講到一半換表情也跟著讓開`, async () => {
+    const r = await eachMood(APP, vp);
+    assert.strictEqual(Object.keys(r.value).length, 6);
+    for (const [k, m] of Object.entries(r.value)) assert.doesNotThrow(() => assertBubble(m), `${k}：${JSON.stringify(m)}`);
+    assert.deepStrictEqual(r.console, []);
+  });
+}
+
+test('陽性對照：換表情時泡泡不重擺，桌機上要判成遺憾換成發牌時蓋到臉', async () => {
+  const tmp = brokenCopy([[DEALER_JS, '        onChange();\n      }\n      placeBubble();\n', '        onChange();\n      }\n']]);
+  try {
+    const m = (await eachMood(tmp, DESKTOP)).value['遺憾講到一半換成發牌'];
+    assert.ok(overlaps(m.bubble, m.face), JSON.stringify(m));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- 插畫的貼圖與臉框 ----
+// 立牌每種表情貼的是自己那張；量產出檔記的五官框：要落在人身上（側臉的框會帶到一點臉外的背景）、而且有一定比例是膚色（框跟畫出來的臉對得上）
+const ART_TEX = `(async () => {
+  const d = BJK.view.stage.dealer, A = BJK.view.dealerArt;
+  await d.ready;
+  const out = { look: d.look, loaded: d.loaded, standee: {}, face: {} };
+  for (const m of Object.keys(BJK.view.dealer.MOODS)) {
+    d.setMood(m);
+    const img = d.mesh.material.map.image;
+    out.standee[m] = img.src === A.images[m] && img.naturalWidth === A.size[0] && img.naturalHeight === A.size[1];
+    const c = document.createElement('canvas'); c.width = A.size[0]; c.height = A.size[1];
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const k = A.size[0] / ${VB_W}, [x0, y0, x1, y1] = A.marks[m].face.map(v => Math.round(v * k));
+    const p = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let opaque = 0, skin = 0;
+    for (let i = 0; i < p.length; i += 4) {
+      const r = p[i], g = p[i + 1], b = p[i + 2];
+      if (p[i + 3] > 200) opaque++;
+      if (p[i + 3] > 200 && r > 215 && g > 150 && g < 228 && b > 100 && b < 200 && r - b > 45 && r - g > 15) skin++;
+    }
+    const [hx0, hy0, hx1, hy1] = A.marks[m].head, [fx0, fy0, fx1, fy1] = A.marks[m].face;
+    out.face[m] = { opaque: +(opaque / (p.length / 4)).toFixed(3), skin: +(skin / (p.length / 4)).toFixed(3),
+                    inHead: fx0 >= hx0 && fy0 >= hy0 && fx1 <= hx1 && fy1 <= hy1 };
+  }
+  return out;
+})()`;
+const artTex = appDir => withPage(availableBrowsers()[0], DESKTOP, async page => {
+  await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
+  return page.evaluate(ART_TEX);
+});
+function faceMarkProblems(face) {
+  return Object.entries(face).filter(([, f]) => !(f.opaque >= 0.9 && f.skin >= 0.3 && f.inHead)).map(([m, f]) => `${m}：${JSON.stringify(f)}`);
+}
+
+test(`${availableBrowsers()[0]}：預設是插畫，五張都載入，每種表情立牌貼自己那張，五官框量在臉上`, async t => {
+  const r = await artTex(APP), why = JSON.stringify(r.value);
+  t.diagnostic(`五官框：${JSON.stringify(r.value.face)}`);
+  assert.strictEqual(r.value.look, 'art', why);
+  assert.strictEqual(r.value.loaded, 5, why);
+  assert.deepStrictEqual(r.value.standee, Object.fromEntries(MOODS.map(m => [m, true])), why);
+  assert.deepStrictEqual(faceMarkProblems(r.value.face), []);
+  assert.deepStrictEqual(r.console, []);
+});
+
+test('陽性對照：五種表情都貼待機那張，要判成貼錯圖', async () => {
+  const tmp = brokenCopy([[DEALER_JS, 'src: mood => ART.images[mood],', 'src: () => ART.images.idle,']]);
+  try {
+    const s = (await artTex(tmp)).value.standee;
+    assert.deepStrictEqual(Object.keys(s).filter(m => !s[m]), ['deal', 'surprised', 'smile', 'sorry']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('陽性對照：待機的臉框換成遺憾那張的，要判成框不在臉上', async () => {
+  const art = loadArt(), line = m => `      ${m}: ${JSON.stringify(art.marks[m])},`;
+  const tmp = brokenCopy([[ART_JS, line('idle'), line('idle').replace(JSON.stringify(art.marks.idle), JSON.stringify(art.marks.sorry))]]);
+  try {
+    const problems = faceMarkProblems((await artTex(tmp)).value.face);
+    assert.ok(problems.some(p => p.startsWith('idle：')), problems.join('｜'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- 舊版造型的手臂（BJK-01 就是出在這一款）----
+// 把每種表情的 SVG 畫到畫布上，讀兩邊垂袖處（SVG 座標）的不透明度：只有發牌時舉右手，右袖處要空
+const ARMS = `(async () => {
   await BJK.view.stage.dealer.ready;
   const read = mood => new Promise((ok, fail) => {
     const img = new Image();
@@ -96,74 +208,27 @@ const ARMS = (look, lx, rx) => `(async () => {
       const c = document.createElement('canvas'); c.width = 560; c.height = 520;
       const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, 560, 520);
       const alpha = (x, y) => ctx.getImageData(x, y, 1, 1).data[3];
-      const doc = new DOMParser().parseFromString(BJK.view.dealer.svg(mood, null, '${look}'), 'image/svg+xml');
-      ok({ left: alpha(${lx}, 490), right: alpha(${rx}, 490), arms: doc.querySelectorAll('g.arm').length });
+      ok({ left: alpha(166, 490), right: alpha(394, 490) });
     };
     img.onerror = () => fail(new Error(mood + ' 的 SVG 載不起來'));
-    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(BJK.view.dealer.svg(mood, null, '${look}'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(BJK.view.dealer.classicSvg(mood));
   });
   const out = {};
   for (const m of Object.keys(BJK.view.dealer.MOODS)) out[m] = await read(m);
   return out;
 })()`;
 
-async function measureArms(appDir, look = 'jojo') {
+async function measureArms(appDir) {
   const r = await withPage(availableBrowsers()[0], DESKTOP, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
-    return page.evaluate(look === 'jojo' ? ARMS(look, 118, 446) : ARMS(look, 166, 394));
+    return page.evaluate(ARMS);
   });
   return r.value;
 }
 
-function assertTwoArms(arms) {
-  const why = JSON.stringify(arms);
-  assert.deepStrictEqual(Object.keys(arms).sort(), Object.keys(RAISED).sort(), `表情清單跟 RAISED 對不上：${why}`);
-  for (const [mood, a] of Object.entries(arms)) {
-    for (const side of ['left', 'right']) {
-      if (side === RAISED[mood]) assert.strictEqual(a[side], 0, `${mood}：${side} 手舉起來了袖子還垂著，多一隻手：${why}`);
-      else assert.strictEqual(a[side], 255, `${mood}：${side} 袖不見了（量法可能讀錯）：${why}`);
-    }
-    assert.strictEqual(a.arms, 2, `${mood}：畫了 ${a.arms} 組手臂：${why}`);
-  }
-}
-
-test(`${availableBrowsers()[0]}：五種表情都只有兩隻手，舉起來的那隻手不再另外垂一隻袖子`, async () => {
-  assertTwoArms(await measureArms(APP));
-});
-
-test('陽性對照：舉手時照樣畫垂著的袖子（不算手臂組數），要判成多一隻手', async () => {
-  const tmp = brokenCopy([[DEALER_JS, '${left()}${right()}', `\${left()}\${right()}\${ARM_R.hang().replace('class="arm"', '')}`]]);
-  try {
-    const arms = await measureArms(tmp);
-    assert.throws(() => assertTwoArms(arms), /多一隻手/);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('陽性對照：多畫一隻舉起來的手（垂袖處看不出來），要判成手臂組數不對', async () => {
-  const tmp = brokenCopy([[DEALER_JS, '${left()}${right()}', '${left()}${right()}${ARM_R.brow()}']]);
-  try {
-    const arms = await measureArms(tmp);
-    assert.throws(() => assertTwoArms(arms), /畫了 3 組手臂/);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('陽性對照：垂著的袖子不畫，要判成袖子不見了', async () => {
-  const tmp = brokenCopy([[DEALER_JS, 'hang: () => arm([[146, 356], [122, 446], [112, 620]]),', 'hang: () => arm([[146, 356], [122, 400], [112, 420]]),']]);
-  try {
-    const arms = await measureArms(tmp);
-    assert.throws(() => assertTwoArms(arms), /袖不見了/);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-// 舊版造型只有發牌時舉右手（BJK-01 就是出在這一款），表情鍵照 RAISED 的順序讀
 function assertClassicArms(arms) {
   const why = JSON.stringify(arms);
+  assert.deepStrictEqual(Object.keys(arms), MOODS, `表情清單對不上：${why}`);
   for (const [mood, a] of Object.entries(arms)) {
     assert.strictEqual(a.left, 255, `${mood}：左袖不見了（量法可能讀錯）：${why}`);
     assert.strictEqual(a.right, mood === 'deal' ? 0 : 255, mood === 'deal' ? `發牌時右袖還垂著，多一隻手：${why}` : `${mood}：右袖不見了：${why}`);
@@ -171,20 +236,20 @@ function assertClassicArms(arms) {
 }
 
 test('舊版造型：五種表情都只有兩隻手', async () => {
-  assertClassicArms(await measureArms(APP, 'classic'));
+  assertClassicArms(await measureArms(APP));
 });
 
 test('陽性對照：舊版發牌時照樣畫垂著的右袖，要判成多一隻手', async () => {
   const tmp = brokenCopy([[path.join('js', 'view', 'dealer_classic.js'), "${mood === 'deal' ? '' : RIGHT_SLEEVE}", '${RIGHT_SLEEVE}']]);
   try {
-    const arms = await measureArms(tmp, 'classic');
+    const arms = await measureArms(tmp);
     assert.throws(() => assertClassicArms(arms), /多一隻手/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-// 點荷官換造型。用 CDP 真的點，點到哪個物件由頁面自己的射線判斷
+// ---- 點荷官換造型。用 CDP 真的點，點到哪個物件由頁面自己的射線判斷 ----
 const open = async (page, appDir) => {
   await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
   return page.evaluate(`(async () => { const d = BJK.view.stage.dealer; await d.ready; const f = d.faceRect();
@@ -217,13 +282,14 @@ for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE]]) {
       return { first, second, reloaded, third };
     });
     const { first, second, reloaded, third } = r.value, why = JSON.stringify(r.value);
-    assert.strictEqual(first.look, 'jojo', why);
+    assert.strictEqual(first.look, 'art', why);
     assert.strictEqual(second.look, 'classic', `點了沒換：${why}`);
     assert.strictEqual(second.loaded, 5, why);
     assert.strictEqual(second.says, '還是這身穿起來順手。', why);
     assert.deepStrictEqual(second.prefs, { odds: false, look: 'classic' }, why);
     assert.strictEqual(reloaded.look, 'classic', `重新整理後沒記得：${why}`);
-    assert.strictEqual(third.look, 'jojo', `換不回來：${why}`);
+    assert.strictEqual(third.look, 'art', `換不回來：${why}`);
+    assert.strictEqual(third.says, '這身才夠氣勢。', why);
     assert.deepStrictEqual(r.console, []);
   });
 }
@@ -241,7 +307,7 @@ async function missedLook(appDir, target) {
 
 for (const [name, target] of Object.entries(MISSES)) {
   test(`${availableBrowsers()[0]}：點${name}不會換造型`, async () => {
-    assert.strictEqual(await missedLook(APP, target), 'jojo');
+    assert.strictEqual(await missedLook(APP, target), 'art');
   });
 }
 
@@ -311,38 +377,51 @@ test(`${availableBrowsers()[0]}：換造型只重畫一次、不開迴圈，滑�
   assert.strictEqual(r.value.later, 0, why);
 });
 
+// ---- 大特寫跟著目前的造型 ----
+// 插畫：裁的是立牌那張、表情對（荷官 Blackjack 是微笑），五官框在；舊版：SVG（有 #bjkSkin 漸層）
+const FX_LOOK = `(() => {
+  BJK.view.fx.showcase('dealer');
+  // 開頁後的預演（.bigfx-warm，你拿 Blackjack 那段）可能還在頁面上，只認真的這一段
+  const f = document.querySelector('.bigfx[data-kind="dealer"] .bigfx-face'), img = f.querySelector('image');
+  return { classic: !!f.querySelector('#bjkSkin'), art: !!img && img.getAttribute('href') === BJK.view.dealerArt.images.smile, face: !!f.querySelector('.face') };
+})()`;
+
 test(`${availableBrowsers()[0]}：大特效的臉跟著目前的造型；播的時候點荷官不換`, async () => {
+  const art = await withPage(availableBrowsers()[0], DESKTOP, async page => {
+    await open(page, APP);
+    return page.evaluate(FX_LOOK);
+  });
+  assert.deepStrictEqual(art.value, { classic: false, art: true, face: true });
   const r = await withPage(availableBrowsers()[0], { ...DESKTOP, init: SAVED_CLASSIC }, async page => {
     const at = await open(page, APP);
-    await page.evaluate(`BJK.view.fx.showcase('dealer'); true`);
-    const classic = await page.evaluate(`!!document.querySelector('.bigfx-face #bjkSkin')`);
+    const shown = await page.evaluate(FX_LOOK);
     const during = await clickAndWait(page, at.x, at.y, 500);
-    return { classic, during: during.look };
+    return { ...shown, during: during.look };
   });
-  assert.deepStrictEqual(r.value, { classic: true, during: 'classic' });
+  assert.deepStrictEqual(r.value, { classic: true, art: false, face: true, during: 'classic' });
 });
 
 test('陽性對照：大特效不看目前造型，要判成臉不對', async () => {
-  const tmp = brokenCopy([[path.join('js', 'view', 'showcase.js'), 'V.dealer.portrait(mood)', "V.dealer.svg(mood, '146 28 290 290', 'jojo')"]]);
+  const tmp = brokenCopy([[path.join('js', 'view', 'showcase.js'), 'V.dealer.portrait(mood)', "V.dealer.portrait(mood, 'art')"]]);
   try {
     const r = await withPage(availableBrowsers()[0], { ...DESKTOP, init: SAVED_CLASSIC }, async page => {
       await open(page, tmp);
-      await page.evaluate(`BJK.view.fx.showcase('dealer'); true`);
-      return page.evaluate(`!!document.querySelector('.bigfx-face #bjkSkin')`);
+      return page.evaluate(FX_LOOK);
     });
-    assert.strictEqual(r.value, false);
+    assert.strictEqual(r.value.classic, false);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test(`${availableBrowsers()[0]}：偏好裡的造型是壞值時當成預設，不擲錯`, async () => {
-  for (const bad of ['"constructor"', '"xxx"', '123', 'null']) {
+// 存著已拿掉的 JOJO 造型（v0.16～v0.19 的預設）或壞值的玩家，一律落回預設、不擲錯
+test(`${availableBrowsers()[0]}：偏好裡的造型是舊的 jojo 或壞值時當成預設，不擲錯`, async () => {
+  for (const bad of ['"jojo"', '"constructor"', '"xxx"', '123', 'null']) {
     const r = await withPage(availableBrowsers()[0], { ...DESKTOP, init: `localStorage.setItem('bjk.prefs.v1', '{"look":${bad}}');` }, async page => {
       await open(page, APP);
       return lookNow(page);
     });
-    assert.strictEqual(r.value.look, 'jojo', bad);
+    assert.strictEqual(r.value.look, 'art', bad);
     assert.strictEqual(r.value.loaded, 5, bad);
     assert.deepStrictEqual(r.console, [], bad);
   }
@@ -352,41 +431,3 @@ test(`${availableBrowsers()[0]}：偏好裡的造型是壞值時當成預設，�
 // 往右出界被瀏覽器擋掉（position: fixed 的泡泡寬度是 auto，會自己縮窄換行）；
 // 往上出界要荷官的臉貼近畫面頂端，而實測 6 種尺寸（390×844 到 1280×720）臉的上緣最少還有 78px。
 // dealer.js 的夾回是保險，不是現在靠它撐著。
-
-// 烘焙圖（dealer_baked.js）是從 JOJO 的 SVG 算出來的：畫法改了沒重跑 tools/bake_dealer.js，桌上就會是舊的樣子
-const BAKED = `(() => {
-  const B = BJK.view.dealerBaked, D = BJK.view.dealer, d = BJK.view.stage.dealer;
-  const stale = Object.keys(D.MOODS).filter(m => B.hash(D.svg(m, null, 'jojo')) !== B.source[m]);
-  const portrait = new DOMParser().parseFromString(D.portrait('smile'), 'image/svg+xml');
-  return { stale, standee: d.mesh.material.map.image.src === B.images[d.mood],
-           portrait: portrait.querySelector('image') ? portrait.querySelector('image').getAttribute('href') === B.images.smile : false,
-           face: !!portrait.querySelector('g.face') };
-})()`;
-const readBaked = appDir => withPage(availableBrowsers()[0], DESKTOP, async page => {
-  await open(page, appDir);
-  return page.evaluate(BAKED);
-});
-
-test(`${availableBrowsers()[0]}：立牌與大特寫用烘焙圖，烘焙圖跟 SVG 畫法同步`, async () => {
-  const r = await readBaked(APP);
-  assert.deepStrictEqual(r.value, { stale: [], standee: true, portrait: true, face: true }, '畫法改過就重跑 node tools/bake_dealer.js');
-  assert.deepStrictEqual(r.console, []);
-});
-
-test('陽性對照：改了 JOJO 外套的顏色沒重跑烘焙，要判成五張都過期', async () => {
-  const tmp = brokenCopy([[path.join('js', 'view', 'dealer.js'), "coat: '#008080'", "coat: '#008081'"]]);
-  try {
-    assert.deepStrictEqual((await readBaked(tmp)).value.stale, ['idle', 'deal', 'surprised', 'smile', 'sorry']);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('陽性對照：立牌照舊用 SVG 當貼圖，要判成沒用烘焙圖', async () => {
-  const tmp = brokenCopy([[path.join('js', 'view', 'dealer.js'), 'img.src = baked ? baked[mood] :', 'img.src =']]);
-  try {
-    assert.strictEqual((await readBaked(tmp)).value.standee, false);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
