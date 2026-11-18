@@ -305,6 +305,17 @@
       topUps += amount;
     }
 
+    // 籌碼直接設成 amount（玩家按「籌碼重置」）：多的扣掉、少的補上。差額照樣記進 topUps（可以是負的），
+    // 「籌碼＋莊家＝起始＋補給」的帳才對得上。回傳事件，畫面照事件更新籌碼數字
+    function setBankroll(id, amount) {
+      if (phase !== 'idle') throw new Error('牌局進行中不能重置籌碼');
+      if (!Number.isInteger(amount) || amount < 0) throw new Error(`籌碼要是不小於 0 的整數，收到 ${amount}`);
+      const s = seat(id), delta = amount - s.bankroll;
+      s.bankroll = amount;
+      topUps += delta;
+      return [{ type: 'bankroll', seat: id, amount, delta }];
+    }
+
     // totalBet：這個座位押在桌上的總額（各手加起來）。
     // 回傳的一律是拷貝，誰改了它都碰不到牌局。逐層拷貝，不走 JSON 來回：那一步佔全 AI 長跑的九成三（P-11）
     const copyCard = c => c && { ...c };
@@ -327,7 +338,7 @@
       };
     }
 
-    return { startRound, legal, act, aiChoice, finishRound, topUp, state, rules: o };
+    return { startRound, legal, act, aiChoice, finishRound, topUp, setBankroll, state, rules: o };
   }
 
   // 下注階段預先填好的注：沿用上一注，但不超過籌碼與上限，還要對齊 step。

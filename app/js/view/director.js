@@ -122,10 +122,11 @@
       money.onTable = onTableOf(st);
     }
     function applyMoney(e) {
-      const delta = { bet: -e.amount, split: -e.amount, double: -e.amount / 2, settle: e.bet + e.net }[e.type];
+      const delta = { bet: -e.amount, split: -e.amount, double: -e.amount / 2, settle: e.bet + e.net, bankroll: e.delta }[e.type];
       if (delta === undefined || !money.bank.has(e.seat)) return;
       money.bank.set(e.seat, money.bank.get(e.seat) + delta);
-      if (e.seat === 'me') money.onTable -= e.type === 'settle' ? e.bet : delta;
+      // 籌碼重置只在下注階段，桌上沒有注
+      if (e.seat === 'me' && e.type !== 'bankroll') money.onTable -= e.type === 'settle' ? e.bet : delta;
     }
     syncMoney();
     const mismatches = [];
@@ -499,6 +500,11 @@
         showcaseShown = false;
         updateLabels();
       },
+      // 籌碼重置：數字照事件改（applyMoney），荷官講一句
+      bankroll(e) {
+        if (e.seat === 'me') say('smile', `籌碼重置好了，從 ${e.amount.toLocaleString()} 重新開始！`);
+        updateLabels();
+      },
     };
 
     async function play(events) {
@@ -561,6 +567,9 @@
         for (const id of shadow.hands.keys()) shadow.hands.set(id, []);
       } else if (e.type === 'settle' && handsOf(e.seat)[e.hand].stacks.length) {
         fail(`${meta[e.seat].name} 第 ${e.hand + 1} 手結算後籌碼還留在桌上（${e.result}）`);
+      } else if (e.type === 'bankroll') {
+        if (money.bank.get(e.seat) !== e.amount) fail(`${meta[e.seat].name} 籌碼重置後畫面上是 ${money.bank.get(e.seat)}，應該是 ${e.amount}`);
+        if (e.seat === 'me' && Number(document.getElementById('bank').textContent.replace(/,/g, '')) !== e.amount) fail(`籌碼重置後操作列的籌碼不是 ${e.amount}`);
       }
       for (const s of SEATS) {
         const seen = keys(handsOf(s.id).map(h => h.cards)), want = keys(shadow.hands.get(s.id));
@@ -674,6 +683,15 @@
       enterBetting();
     }
 
+    // 左上角（直式在拉頁裡）的籌碼重置：多於或少於都回到 START，只動玩家；戰績與 AI 的籌碼不動。
+    // 只在下注階段（含輸光）；存檔在 enterBetting 立刻寫
+    async function resetChips() {
+      if (game.state().phase !== 'idle' || !['bet', 'broke'].includes(hud.currentMode)) return false;
+      await play(game.setBankroll('me', START));
+      enterBetting();
+      return true;
+    }
+
     // 探針用：玩家也交給穩健策略，連打 n 局，回傳每局花多久、分了幾次牌、畫面引擎的不一致清單
     async function autoplay(n, bet) {
       auto = true;
@@ -698,7 +716,7 @@
     if (hud.currentMode !== 'broke') say('idle', saved.me !== undefined ? '歡迎回來，籌碼幫你留著了。請下注！' : '歡迎光臨，請下注！');
 
     return {
-      game, layout, autoplay, runRound, resetBankroll,
+      game, layout, autoplay, runRound, resetBankroll, resetChips,
       // 探針量版面用：每個座位的每一手（牌、籌碼）與各手的點數標籤
       hands: id => handsOf(id),
       labels: id => handLabels.get(id).slice(0, handsOf(id).length),
@@ -710,5 +728,5 @@
     };
   }
 
-  V.director = { create, SEATS };
+  V.director = { create, SEATS, START };
 })();

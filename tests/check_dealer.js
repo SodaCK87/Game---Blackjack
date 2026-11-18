@@ -168,6 +168,8 @@ test('陽性對照：直式畫面不收拉頁、按鈕與版本號留在上方�
     const r = (await eachMood(tmp, SHORT_PHONE)).value;
     const hits = Object.values(r).flatMap(m => m.ui.filter(u => overlaps(m.bubble, u)).map(u => u.id));
     assert.ok(hits.includes('soundToggle') || hits.includes('statsBtn'), `破壞後泡泡仍沒疊到按鈕：${JSON.stringify(r)}`);
+    // 第三顆（籌碼重置）也要在量的範圍裡，排在左上角時一樣抓得到
+    assert.ok(hits.includes('chipResetBtn'), `破壞後泡泡仍沒疊到籌碼重置鈕：${JSON.stringify(r)}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

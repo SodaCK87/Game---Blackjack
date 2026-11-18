@@ -85,6 +85,10 @@ const MUTANTS = [
   ['戰績：籌碼最高點沒跟著更新', 'app/js/core/stats.js', 's.peak = Math.max(s.peak, bankroll);', 's.peak = s.peak;', 'tests/check_stats.js'],
   ['戰績存檔：數字互相矛盾照收', 'app/js/core/stats.js', 'if (raw.basic > raw.decisions || raw.wins + raw.losses + raw.pushes !== raw.hands || raw.streak > raw.bestStreak) return empty(bankroll);', '', 'tests/check_stats.js'],
   ['戰績存檔：淨輸贏是負的就當壞檔', 'app/js/core/stats.js', "if (!Number.isInteger(n) || (f !== 'net' && n < 0)) return empty(bankroll);", 'if (!Number.isInteger(n) || n < 0) return empty(bankroll);', 'tests/check_stats.js'],
+  // ---- 籌碼重置 ----
+  ['籌碼重置只補不扣（多於 1,000 沒降回）', 'app/js/core/game.js', 's.bankroll = amount;\n      topUps += delta;', 's.bankroll = Math.max(s.bankroll, amount);\n      topUps += delta;', 'tests/check_game.js'],
+  ['籌碼重置的差額沒記進 topUps（帳不平）', 'app/js/core/game.js', 's.bankroll = amount;\n      topUps += delta;', 's.bankroll = amount;', 'tests/check_game.js'],
+  ['牌局進行中也能重置籌碼', 'app/js/core/game.js', "if (phase !== 'idle') throw new Error('牌局進行中不能重置籌碼');", '', 'tests/check_game.js'],
 ];
 
 // 失敗清單裡「有名字的」那幾條：載入就擲錯時 node 記的是以檔名命名的一條（tests\check_x.js），不算

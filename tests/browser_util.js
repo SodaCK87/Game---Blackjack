@@ -198,6 +198,12 @@ async function withPage(browser, { size = [1280, 720], mobile = false, init = ''
           await client.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
         }
       },
+      // 真的按一個鍵（CDP Input），例如 key('Escape', 27)：跟 click 一樣算使用者操作，走瀏覽器的焦點與鍵盤事件
+      async key(key, keyCode) {
+        for (const type of ['keyDown', 'keyUp']) {
+          await client.send('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode });
+        }
+      },
       // 雙指放大到 scale 倍（1＝沒放大）。Input.synthesizePinchGesture 在這台的無頭模式回成功、visualViewport.scale 卻不動，
       // 所以走 Emulation；呼叫端要讀 visualViewport.scale 確認真的變了
       async zoom(scale) {

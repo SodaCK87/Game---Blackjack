@@ -4,6 +4,8 @@
 //                                                再加最長那句對白在桌機、390×844、390×720、360×640 各一張（dealer-long-*）
 //       node tools/shoot.js [檔名前綴] --round   照正常速度打一局，桌機與手機各截四個時間點
 //       node tools/shoot.js [檔名前綴] --cards   J、Q、K 與牌背、籌碼的貼圖原寸排一張，中間一排縮成手機上一張牌的大小
+//       node tools/shoot.js [檔名前綴] --reset   籌碼重置的確認視窗開著（桌機、矮的直式手機各一張）、按下重置之後各一張，
+//                                                 外加矮的直式手機戰績視窗開著一張（兩種視窗都蓋遮罩）
 //       以上都可以再加 --classic，改用舊版荷官造型
 const fs = require('fs');
 const path = require('path');
@@ -30,6 +32,7 @@ const prefix = args.find(a => !a.startsWith('--')) || 'shot';
 const dealerMode = args.includes('--dealer');
 const roundMode = args.includes('--round');
 const cardsMode = args.includes('--cards');
+const resetMode = args.includes('--reset');
 
 // --cards：直接拿 textures.js 畫好的畫布排成一張。中間那排照手機上一張牌約 55 CSS 像素、畫布密度 2 縮成 110 寬；
 // 那是 canvas 縮圖不是 GPU 取樣，只拿來看角標讀不讀得出來
@@ -84,13 +87,21 @@ async function shootRound(browser, url, viewport, tag) {
   });
 }
 
+// --reset：存檔先寫成 2,350，按出確認視窗；ok 再按「重置」
+const RICH = `${init} localStorage.setItem('bjk.save.v1', '{"v":1,"bankrolls":{"me":2350}}');`;
 const jobs = dealerMode
   ? [...Object.keys(LINES).map(mood => ({ name: `dealer-${mood}`, viewport: DESKTOP, mood })),
      { name: 'dealer-mobile', viewport: PHONE, mood: 'smile' },
      ...Object.entries({ desktop: DESKTOP, mobile: PHONE, short: SHORT_PHONE, small: SMALL_PHONE })
        .map(([tag, viewport]) => ({ name: `dealer-long-${tag}`, viewport, mood: 'surprised', line: BUBBLE_LINES[0] }))]
-  : [{ name: 'desktop', viewport: DESKTOP }, { name: 'mobile', viewport: PHONE },
-     { name: 'short', viewport: SHORT_PHONE }, { name: 'short-open', viewport: SHORT_PHONE, open: true }];
+  : resetMode
+    ? [{ name: 'confirm-desktop', viewport: { ...DESKTOP, init: RICH }, confirm: true },
+       { name: 'confirm-short', viewport: { ...SHORT_PHONE, init: RICH }, open: true, confirm: true },
+       { name: 'confirm-desktop-done', viewport: { ...DESKTOP, init: RICH }, confirm: true, ok: true },
+       { name: 'confirm-short-done', viewport: { ...SHORT_PHONE, init: RICH }, open: true, confirm: true, ok: true },
+       { name: 'stats-short', viewport: { ...SHORT_PHONE, init: RICH }, open: true, stats: true }]
+    : [{ name: 'desktop', viewport: DESKTOP }, { name: 'mobile', viewport: PHONE },
+       { name: 'short', viewport: SHORT_PHONE }, { name: 'short-open', viewport: SHORT_PHONE, open: true }];
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
@@ -122,11 +133,17 @@ const jobs = dealerMode
         await d.ready;
         ${job.mood ? `d.setMood(${JSON.stringify(job.mood)}); d.say(${JSON.stringify(job.line || LINES[job.mood])});` : ''}
       })()`);
-      if (job.open) {
-        // 真的點一下左邊的把手，等拉頁的 CSS transition 跑完
-        await page.click(...await page.evaluate(`(() => { const r = document.getElementById('drawerHandle').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`));
+      // 真的點一下（左邊的把手、籌碼重置鈕、確認視窗的重置），等拉頁的 CSS transition 跑完
+      const press = async id => {
+        await page.click(...await page.evaluate(`(() => { const r = document.getElementById('${id}').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`));
         await page.evaluate(DRAWER_SETTLED);
-      }
+      };
+      if (job.open) await press('drawerHandle');
+      if (job.stats) await press('statsBtn');
+      if (job.confirm) await press('chipResetBtn');
+      if (job.ok) await press('chipResetOk');
+      // 遮罩淡入 0.15 秒，等它播完再截，不然截到半透明的一半
+      if (job.stats || job.confirm) await page.evaluate('Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))).then(() => true)');
       await page.screenshot(file);
     });
     console.log(`✔ ${path.relative(process.cwd(), file)}（${job.viewport.size.join('×')}，${browser}，殘留進程 ${r.leftover}）`);

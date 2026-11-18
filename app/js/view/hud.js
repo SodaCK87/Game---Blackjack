@@ -36,13 +36,19 @@
     ];
   }
 
-  function create({ minBet, maxBet, step, onDeal, onReset, getStats }) {
+  function create({ minBet, maxBet, step, resetTo, onDeal, onReset, onResetChips, getStats }) {
     if (!V.sfx) throw new Error('載入順序錯：sfx.js 要排在 hud.js 之前');
     const $ = id => document.getElementById(id);
     const betBar = $('betBar'), actBar = $('actBar'), brokeBar = $('brokeBar');
     $('resetBtn').addEventListener('click', () => onReset());
 
-    // 戰績：點左上第二顆鈕打開，關閉鈕、Esc、點面板外面都會關
+    // 戰績與籌碼重置的視窗開著時，底下蓋一層遮罩（style.css 的 #scrim）：拉頁、按鈕、牌桌都點不到，
+    // 點遮罩等同關閉／取消。關掉後焦點回到叫出視窗的那顆鈕，拉頁維持原本的開合
+    const statsPanel = $('statsPanel'), statsBtn = $('statsBtn');
+    const resetBtn = $('chipResetBtn'), resetPanel = $('chipResetPanel'), scrim = $('scrim');
+    const syncScrim = () => { scrim.hidden = statsPanel.hidden && resetPanel.hidden; };
+
+    // 戰績：點左上第二顆鈕打開，關閉鈕、Esc、點遮罩都會關
     function openStats() {
       const s = getStats && getStats();
       if (!s) return;
@@ -50,15 +56,48 @@
         Object.assign(document.createElement('dt'), { textContent: k }),
         Object.assign(document.createElement('dd'), { textContent: v }),
       ]));
-      $('statsPanel').hidden = false;
+      statsPanel.hidden = false;
+      syncScrim();
       $('statsClose').focus();
     }
-    const closeStats = () => { $('statsPanel').hidden = true; };
-    $('statsBtn').addEventListener('click', () => ($('statsPanel').hidden ? openStats() : closeStats()));
+    function closeStats() {
+      if (statsPanel.hidden) return;
+      statsPanel.hidden = true;
+      syncScrim();
+      statsBtn.focus();
+    }
+    statsBtn.addEventListener('click', () => (statsPanel.hidden ? openStats() : closeStats()));
     $('statsClose').addEventListener('click', closeStats);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeStats(); });
-    document.addEventListener('pointerdown', e => {
-      if (!$('statsPanel').hidden && !$('statsPanel').contains(e.target) && !$('statsBtn').contains(e.target)) closeStats();
+
+    // 籌碼重置：先跳確認視窗。焦點先放在取消（按 Enter 不會一下子就清掉籌碼）
+    const canResetChips = () => mode === 'bet' || mode === 'broke';
+    function openReset() {
+      if (!canResetChips()) return;
+      $('chipResetText').textContent = `籌碼會回到 ${resetTo.toLocaleString()}（現在 ${bankroll.toLocaleString()}）`;
+      resetPanel.hidden = false;
+      syncScrim();
+      $('chipResetCancel').focus();
+    }
+    function cancelReset() {
+      resetPanel.hidden = true;
+      syncScrim();
+      resetBtn.focus();
+    }
+    resetBtn.addEventListener('click', () => (resetPanel.hidden ? openReset() : cancelReset()));
+    $('chipResetCancel').addEventListener('click', cancelReset);
+    scrim.addEventListener('click', () => (resetPanel.hidden ? closeStats() : cancelReset()));
+    $('chipResetOk').addEventListener('click', () => {
+      resetPanel.hidden = true;
+      syncScrim();
+      if (!canResetChips()) return;
+      // 下注歸零，回到下注階段時也不沿用上一注；先歸零再交給導演，它核對畫面時看到的下注才是 0
+      bet = 0;
+      lastBet = 0;
+      refresh();
+      onResetChips();
+      // 直式畫面收起拉頁，荷官的對白與新的籌碼數字才不會被拉頁擋住
+      setDrawer(false);
+      (document.body.dataset.orient === 'portrait' ? handle : resetBtn).focus();
     });
 
     // 直式畫面左邊緣的拉頁：點把手拉出、再點收回；點拉頁外面或按 Esc 也收回。橫式畫面 CSS 不套用，開關的狀態不影響畫面
@@ -68,8 +107,16 @@
       handle.setAttribute('aria-expanded', String(open));
     }
     handle.addEventListener('click', () => setDrawer(drawer.dataset.open !== 'true'));
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') setDrawer(false); });
-    document.addEventListener('pointerdown', e => { if (drawer.dataset.open === 'true' && !drawer.contains(e.target)) setDrawer(false); });
+    // 視窗開著時 Esc 只關最上面那個視窗：拉頁與焦點留在原按鈕
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      if (!resetPanel.hidden) cancelReset();
+      else if (!statsPanel.hidden) closeStats();
+      else setDrawer(false);
+    });
+    // 視窗與遮罩也算在拉頁裡：視窗是從拉頁裡的鈕叫出來的，關掉視窗不該順手把拉頁收掉
+    const inDrawer = t => drawer.contains(t) || scrim.contains(t) || statsPanel.contains(t) || resetPanel.contains(t);
+    document.addEventListener('pointerdown', e => { if (drawer.dataset.open === 'true' && !inDrawer(e.target)) setDrawer(false); });
 
     let soundOn = prefOn('sound');
     function applySound() {
@@ -143,6 +190,8 @@
         betBar.hidden = m !== 'bet';
         actBar.hidden = m !== 'act';
         brokeBar.hidden = m !== 'broke';
+        resetBtn.disabled = !canResetChips();
+        if (resetBtn.disabled) { resetPanel.hidden = true; syncScrim(); }
         if (m === 'bet') bet = BJK.game.prefillBet(lastBet, bankroll, { minBet, maxBet, step });
         if (m === 'act') {
           // 加倍照舊反灰（看得出這手不能加倍）；分牌鈕能分才出現。分開的 A 又補到 A 只能再分或停，要牌與加倍收起來

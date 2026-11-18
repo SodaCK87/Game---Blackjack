@@ -554,3 +554,33 @@ test('不合規的下注整筆拒收，籌碼一毛不扣', () => {
   assert.strictEqual(g.state().seats[0].bankroll, 1000);
   assert.strictEqual(g.state().phase, 'idle');
 });
+
+// 籌碼重置（玩家按左上角的鈕）：不管多於或少於都設成指定值，只動那一個座位；差額記進 topUps，帳照樣平
+test('setBankroll：多的扣回、少的補上，只動指定的座位，差額記進 topUps', () => {
+  const g = createGame({
+    rng: noRng,
+    shoe: stackedShoe(['10', '10', '9', '7', '8', '8']),
+    seats: [{ id: 'me', name: '你', bankroll: 2350 }, { id: 'ai', name: '阿德', bankroll: 430 }],
+  });
+  const ledger = () => { const st = g.state(); return st.seats.reduce((a, s) => a + s.bankroll, 0) + st.house - st.topUps; };
+  const start = ledger();
+  assert.deepStrictEqual(g.setBankroll('me', 1000), [{ type: 'bankroll', seat: 'me', amount: 1000, delta: -1350 }]);
+  assert.deepStrictEqual(g.state().seats.map(s => s.bankroll), [1000, 430]);
+  assert.strictEqual(g.state().topUps, -1350);
+  assert.strictEqual(ledger(), start, '扣回之後帳不平');
+  assert.deepStrictEqual(g.setBankroll('ai', 1000), [{ type: 'bankroll', seat: 'ai', amount: 1000, delta: 570 }]);
+  assert.deepStrictEqual(g.state().seats.map(s => s.bankroll), [1000, 1000]);
+  assert.strictEqual(ledger(), start, '補上之後帳不平');
+  assert.strictEqual(g.setBankroll('me', 1000)[0].delta, 0);
+});
+
+test('setBankroll：牌局進行中、金額不合規、座位不存在都拒絕，籌碼一毛不動', () => {
+  const g = oneSeat(['10', '9', '8', '7'], 2350);
+  assert.throws(() => g.setBankroll('p', -10), /不小於 0 的整數/);
+  assert.throws(() => g.setBankroll('p', 10.5), /不小於 0 的整數/);
+  assert.throws(() => g.setBankroll('x', 1000), /沒有這個座位/);
+  g.startRound({ p: 100 });
+  assert.throws(() => g.setBankroll('p', 1000), /牌局進行中/);
+  assert.strictEqual(g.state().seats[0].bankroll, 2250);
+  assert.strictEqual(g.state().topUps, 0);
+});

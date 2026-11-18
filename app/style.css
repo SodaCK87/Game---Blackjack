@@ -122,9 +122,10 @@ html, body {
   display: none;
 }
 
-/* 音效開關：左上角一顆圓鈕，喇叭帶聲波是開、打叉是關。戰績鈕排在它右邊，同一個樣子 */
+/* 音效開關：左上角一顆圓鈕，喇叭帶聲波是開、打叉是關。戰績鈕、籌碼重置鈕依序排在它右邊，同一個樣子 */
 #soundToggle,
-#statsBtn {
+#statsBtn,
+#chipResetBtn {
   position: fixed;
   top: 6px;
   left: 8px;
@@ -143,14 +144,26 @@ html, body {
   color: var(--cream);
 }
 
-#statsBtn {
+#statsBtn,
+#chipResetBtn {
   left: 56px;
   border-color: var(--teal);
   color: var(--cream);
 }
 
+#chipResetBtn {
+  left: 104px;
+}
+
+/* 牌局進行中按不下去：跟操作列反灰的鈕同一個淡法 */
+#chipResetBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 #soundToggle svg,
-#statsBtn svg {
+#statsBtn svg,
+#chipResetBtn svg {
   display: block;
   width: 100%;
   height: 100%;
@@ -215,12 +228,14 @@ body[data-orient="portrait"] #drawer[data-open="true"] #drawerPanel {
 
 body[data-orient="portrait"] #soundToggle,
 body[data-orient="portrait"] #statsBtn,
+body[data-orient="portrait"] #chipResetBtn,
 body[data-orient="portrait"] #ver {
   position: static;
 }
 
 body[data-orient="portrait"] #soundToggle,
-body[data-orient="portrait"] #statsBtn {
+body[data-orient="portrait"] #statsBtn,
+body[data-orient="portrait"] #chipResetBtn {
   width: 44px;
   height: 44px;
   padding: 9px;
@@ -298,8 +313,26 @@ body[data-orient="portrait"] #drawerHandle {
   overflow-wrap: anywhere;
 }
 
-/* 戰績面板：畫面中間一張卡片，標題靠左、數字靠右 */
-#statsPanel {
+/* 視窗底下的遮罩：牌桌、拉頁、按鈕都退到後面也點不到，但還看得出牌桌。開頁時是 hidden（display: none），
+   淡入只在打開那一下播，開頁不會閃一層 */
+#scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(33, 44, 49, 0.62);
+  animation: scrim-in 0.15s ease-out;
+}
+
+#scrim[hidden] {
+  display: none;
+}
+
+@keyframes scrim-in {
+  from { opacity: 0; }
+}
+
+/* 戰績面板與籌碼重置的確認視窗：畫面中間一張卡片。戰績標題靠左、數字靠右 */
+.card {
   position: fixed;
   left: 50%;
   top: 45%;
@@ -318,13 +351,17 @@ body[data-orient="portrait"] #drawerHandle {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
-#statsPanel[hidden] {
+.card[hidden] {
   display: none;
 }
 
-#statsPanel h2 {
+.card h2 {
   margin: 0 0 8px;
   font-size: 18px;
+}
+
+.card p {
+  margin: 0 0 14px;
 }
 
 #statsPanel dl {
@@ -344,22 +381,39 @@ body[data-orient="portrait"] #drawerHandle {
   font-weight: bold;
 }
 
-/* 跟操作列的主要鈕同一個樣子：青底白字 */
-#statsPanel #statsClose {
+/* 主要鈕跟操作列的同一個樣子：青底白字；另一顆（取消）只留青框 */
+.card button {
   display: block;
   width: 100%;
   padding: 9px 12px;
-  border: 2px solid #00a3a3;
+  border: 2px solid var(--teal);
   border-radius: 10px;
-  background: linear-gradient(#008080, #006464);
-  color: #fff;
+  background: transparent;
+  color: var(--bg);
   font: 15px var(--font);
   cursor: pointer;
+}
+
+.card button.primary {
+  border-color: #00a3a3;
+  background: linear-gradient(#008080, #006464);
+  color: #fff;
+}
+
+.card-row {
+  display: flex;
+  gap: 10px;
+}
+
+.card-row button {
+  flex: 1 1 0;
 }
 
 body[data-fatal] #hud,
 body[data-fatal] #statsBtn,
 body[data-fatal] #soundToggle,
+body[data-fatal] #chipResetBtn,
+body[data-fatal] #scrim,
 body[data-fatal] #drawerHandle {
   display: none;
 }

@@ -72,9 +72,11 @@
       minBet: BJK.game.DEFAULTS.minBet,
       maxBet: BJK.game.DEFAULTS.maxBet,
       step: BJK.game.DEFAULTS.step,
+      resetTo: V.director.START,
       // 不接住的話引擎停在半局、操作列停在 busy，同事只看到畫面不動（BJK-10）
       onDeal: bet => director.runRound(bet).catch(e => showFatal(e.message, true)),
       onReset: () => director.resetBankroll(),
+      onResetChips: () => director.resetChips().catch(e => showFatal(e.message, true)),
       getStats: () => director && director.stats,
     });
 

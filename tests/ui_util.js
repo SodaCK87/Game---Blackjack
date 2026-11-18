@@ -31,6 +31,24 @@ const BUBBLE_LINES = [
   '分牌！每一手照常要牌、停牌。',
   '洗牌中…',
 ];
+// 戰績或籌碼重置的視窗開著時，點畫面上看得到的左上角按鈕、拉頁裡的按鈕與把手，各自落在誰身上：
+// 'scrim' 遮罩、'card' 視窗本身（矮的直式手機上視窗會壓到拉頁），否則是點到的元素 id（代表點得到底下的東西）。
+// bottom 是畫面底部正中（操作列那一帶）點到的，探針拿那一點去點遮罩
+const COVERED = `(() => {
+  const what = (x, y) => { const at = document.elementFromPoint(x, y); return !at ? 'none' : at.id === 'scrim' ? 'scrim' : at.closest('.card') ? 'card' : (at.closest('[id]') || at).id || at.tagName; };
+  const out = {};
+  for (const id of ['soundToggle', 'statsBtn', 'chipResetBtn', 'drawerHandle']) {
+    const r = document.getElementById(id).getBoundingClientRect();
+    if (r.width && r.right > 0 && r.left < innerWidth) out[id] = what(r.left + r.width / 2, r.top + r.height / 2);
+  }
+  return { hits: out, bottom: what(innerWidth / 2, innerHeight - 6), point: [innerWidth / 2, innerHeight - 6] };
+})()`;
+function assertCovered(c, why) {
+  const through = Object.entries(c.hits).filter(([, v]) => v !== 'scrim' && v !== 'card').map(([k, v]) => `${k}→${v}`);
+  assert.deepStrictEqual(through, [], `視窗開著時點得到底下的按鈕或把手：${why}`);
+  // 直式手機上戰績視窗夠高，按鈕與把手全被視窗本身蓋住（都是 card），遮罩在不在改看畫面底部那一點
+  assert.strictEqual(c.bottom, 'scrim', `視窗開著時沒有遮罩（點得到底下的東西）：${why}`);
+}
 const first = () => availableBrowsers()[0];
 
 // 打到輪到你為止（荷官或你拿 Blackjack 那局不會輪到你，就再打一局），量那一刻的標籤與按鈕
@@ -109,4 +127,4 @@ const shownOf = b => Object.fromEntries(Object.entries(b).map(([k, x]) => [k, [x
 // 21 點平手退回加倍後的注（籌碼回到 1,000），同桌三位 19 點輸
 const LATE_BJ = rigInit(['10', '5', '10', '10', 'A', '9', '6', '9', '9', 'K', 'K']);
 
-module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_SETTLED, BUBBLE_LINES, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };
+module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_SETTLED, BUBBLE_LINES, COVERED, assertCovered, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };
