@@ -1,5 +1,6 @@
 // 守牌桌插畫的產出檔（app/js/view/table_art.js，由 tools/make_table_art.js 產生）：跟原圖與產生器同步；
-// J／Q／K 紅黑各一張、每種面額的籌碼都有圖；每張的大小是貼圖要的（人物 2:3、牌背跟牌面畫布一樣大、籌碼正方形）。
+// J／Q／K 紅黑各一張、每種面額的籌碼都有圖、佈景五張材質都在；每張的大小是貼圖要的（人物 2:3、牌背跟牌面畫布一樣大、籌碼正方形、
+// 牆板一段是 room.js 牆的 4:1.3）。佈景材質接得起來（平鋪看不出接縫）要解碼才量得到，在 check_textures.js。
 // 純讀檔，CI 也跑。畫面上貼得對不對、補畫有沒有傳上 GPU，在 check_textures.js 開瀏覽器量；大廳照畫面裁得對不對在 check_room.js。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -28,6 +29,9 @@ function webpSize(buf) {
 const decode = url => Buffer.from(url.split(',')[1], 'base64');
 // 牌面畫布（textures.js 的 CW、CH）與籌碼面額（chips.js 的 DENOMS）以 app 為準，產生器跟著它們
 const [CW, CH] = fs.readFileSync(path.join(VIEW, 'textures.js'), 'utf8').match(/const CW = (\d+), CH = (\d+);/).slice(1).map(Number);
+// 牆一段的寬高（room.js：牆 WALL_W 寬、貼圖重複 WALL_W / 4 次、高 WALL_H）
+const ROOM = fs.readFileSync(path.join(VIEW, 'room.js'), 'utf8');
+const WALL_H = Number(ROOM.match(/WALL_H = ([\d.]+)/)[1]), SEGMENT_W = Number(ROOM.match(/panel\.repeat\.set\(WALL_W \/ ([\d.]+), 1\)/)[1]);
 const DENOMS = JSON.parse(fs.readFileSync(path.join(VIEW, 'chips.js'), 'utf8').match(/const DENOMS = (\[[\d, ]+\]);/)[1]);
 
 // images：{ 名稱: WebP 位元組 }；回傳不合的地方
@@ -38,12 +42,15 @@ function sizeProblems(art, images) {
     back: [CW, CH],
     ...Object.fromEntries(DENOMS.map(v => [`chip_${v}`, [art.chips.size, art.chips.size]])),
     lobby: art.lobby.size,
+    ...Object.fromEntries(ART_TOOL.SCENE_NAMES.map(n => [`scene_${n}`, ART_TOOL.SCENE[n].out])),
   };
   for (const [name, size] of Object.entries(want)) {
     if (!images[name]) { out.push(`少了 ${name}`); continue; }
     const got = webpSize(images[name]);
     if (got[0] !== size[0] || got[1] !== size[1]) out.push(`${name} 是 ${got.join('×')}，要 ${size.join('×')}`);
   }
+  const [ww, wh] = art.scene.wall.size;
+  if (Math.abs(ww / wh / (SEGMENT_W / WALL_H) - 1) > 0.01) out.push(`牆板 ${ww}×${wh} 不是 room.js 一段的 ${SEGMENT_W}:${WALL_H}`);
   if (art.court.size[0] * 3 !== art.court.size[1] * 2) out.push(`人物框 ${art.court.size.join('×')} 不是原圖的 2:3`);
   return out;
 }
@@ -52,10 +59,11 @@ const artImages = art => ({
   back: decode(art.back.image),
   ...Object.fromEntries(Object.entries(art.chips.values).map(([v, c]) => [`chip_${v}`, decode(c.image)])),
   lobby: decode(art.lobby.image),
+  ...Object.fromEntries(Object.entries(art.scene).map(([n, c]) => [`scene_${n}`, decode(c.image)])),
 });
 
 test('table_art.js 跟原圖與產生器同步', () => {
-  assert.strictEqual(loadArt().source, ART_TOOL.sourceHash(), '換了 tests/fixtures/ 的 card_art、chip_art、room_art 或改了 tools/make_table_art.js，就重跑 node tools/make_table_art.js');
+  assert.strictEqual(loadArt().source, ART_TOOL.sourceHash(), '換了 tests/fixtures/ 的 card_art、chip_art、room_art、scene_art 或改了 tools/make_table_art.js，就重跑 node tools/make_table_art.js');
 });
 
 test('陽性對照：換一張原圖、改產生器的品質，都要判成過期', () => {
@@ -72,16 +80,17 @@ test('陽性對照：換一張原圖、改產生器的品質，都要判成過�
   }
 });
 
-test('J／Q／K 紅黑各一張、每種面額的籌碼都有圖，大小都是貼圖要的；大廳的構圖中心在牆線上面', () => {
+test('J／Q／K 紅黑各一張、每種面額的籌碼都有圖、佈景五張都在，大小都是貼圖要的；大廳的構圖中心在牆線上面', () => {
   const art = loadArt();
   assert.deepStrictEqual(Object.keys(art.court.images), ART_TOOL.COURTS);
+  assert.deepStrictEqual(Object.keys(art.scene), ['carpet', 'felt', 'leather', 'wood', 'wall']);
   assert.deepStrictEqual(Object.keys(art.chips.values).map(Number).sort((a, b) => a - b), [...DENOMS].sort((a, b) => a - b));
   assert.deepStrictEqual(sizeProblems(art, artImages(art)), []);
   const { wall, focus } = art.lobby;
   assert.ok(focus > 0 && focus < wall && wall <= 1, `大廳的構圖中心 ${focus}、牆線 ${wall}`);
 });
 
-test('陽性對照：拿原圖量大小，要判成每一張都不合', () => {
+test('陽性對照：拿原圖量大小，要判成每一張都不合；牆板不是一段的比例，要判出來', () => {
   const art = loadArt();
   const read = (d, f) => fs.readFileSync(path.join(ART_TOOL.FIX, d, f));
   const src = {
@@ -89,8 +98,12 @@ test('陽性對照：拿原圖量大小，要判成每一張都不合', () => {
     back: read('card_art', 'back.webp'),
     ...Object.fromEntries(DENOMS.map(v => [`chip_${v}`, read('chip_art', `chip_${v}.webp`)])),
     lobby: read('room_art', 'lobby.webp'),
+    ...Object.fromEntries(ART_TOOL.SCENE_NAMES.map(n => [`scene_${n}`, read('scene_art', `${n}.webp`)])),
   };
   // 先確認量法：原圖讀得出 1024×1536，紅是因為大小、不是檔頭讀錯
   assert.deepStrictEqual(webpSize(src.king_red), [1024, 1536]);
-  assert.strictEqual(sizeProblems(art, src).length, ART_TOOL.COURTS.length + 1 + DENOMS.length + 1);
+  assert.strictEqual(sizeProblems(art, src).length, ART_TOOL.COURTS.length + 1 + DENOMS.length + 1 + ART_TOOL.SCENE_NAMES.length);
+  // 牆板照舊的 1024×320 比例（3.2:1）畫，要判成不是一段的比例
+  const flat = { ...art, scene: { ...art.scene, wall: { ...art.scene.wall, size: [512, 160] } } };
+  assert.ok(sizeProblems(flat, artImages(art)).some(p => p.includes('不是 room.js 一段')));
 });

@@ -1,13 +1,13 @@
-// 把牌桌上的點陣插畫（tests/fixtures/ 底下的 card_art、chip_art、room_art）縮成貼圖要的大小，
+// 把牌桌上的點陣插畫（tests/fixtures/ 底下的 card_art、chip_art、room_art、scene_art）縮成貼圖要的大小，
 // 寫成 app/js/view/table_art.js（不准手改）。換了原圖、改了這支的任何一行就重跑：node tools/make_table_art.js
-// 另外在 tools/_shots/table-art-marks.png 留量測對照圖（不進版控）：籌碼的盤面（橘）、中央空白（青）、取樣邊環（洋紅）與嵌片方位（黃）、
-// 牌背中央的圓（青）、大廳的牆線（橘）與構圖中心（青）
+// 另外在 tools/_shots/ 留量測對照圖（不進版控）：table-art-marks.png 標籌碼的盤面（橘）、中央空白（青）、取樣邊環（洋紅）與嵌片方位（黃）、
+// 牌背中央的圓（青）、大廳的牆線（橘）與構圖中心（青）；scene-art-tiles.png 是佈景五張產出各自平鋪 2×2，看接縫
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures');
-const DIRS = ['card_art', 'chip_art', 'room_art'];
+const DIRS = ['card_art', 'chip_art', 'room_art', 'scene_art'];
 const TARGET = path.join(__dirname, '..', 'app', 'js', 'view', 'table_art.js');
 const OUT = path.join(__dirname, '_shots');
 const COURTS = ['king_red', 'queen_red', 'jack_red', 'king_black', 'queen_black', 'jack_black'];
@@ -23,6 +23,24 @@ const LOBBY_W = 1280;
 // 照亮度算的重心（約 208）落在水晶燈下緣，看到的老虎機只剩上半截
 const LOBBY_FOCUS = 300;
 const QUALITY = 0.85;
+
+// 佈景五張材質（scene_art）：都會平鋪，產出的大小照畫面上一個重複單位最多佔的裝置像素推（2026-11-18 量，見 docs\版本紀錄.md v0.22.0）。
+// region 是原圖可用的範圍：有透明度的三張最外一圈 alpha 只有 193～254，去掉兩像素；fade 是接縫不夠平時交疊的寬度（產出像素）。
+// carpet：原圖是同一塊花磚的 2×2，平移 512 的落差跟相鄰像素同一級，原寸裁一塊 512 就是一格（room.js 一格 400/140 單位，平板最多佔 435 裝置像素）；
+// felt：只取明暗，原樣 1:1 鋪進絨布畫布（每單位 205 像素，畫面最多 153）；
+// leather：扶手一個重複 1.34×1.38 單位（弧長 π·5.12 分 12 段×管的一圈），平板最多 199×218；
+// wood：桌身一個重複 2.72×0.7 單位，平板最寬 379、超寬螢幕最高 55，跟原本的畫布一樣 512×128；
+// wall：鑲板並排兩塊組成一段 4×1.3 單位（room.js），平板最寬 424、超寬螢幕最高 106。
+// quality：暗、起伏小的會被 0.85 壓平，接縫兩邊各自的壓縮誤差反而變成一條線。2026-11-18 量解回來的接縫（P99 是內部的範圍）：
+// 木頭 0.85 是 5.1 倍（P99 2.32）、0.95 是 2.64（2.68）、0.98 是 1.55（1.51），只有 1 才穩（1.05，1.2）；絨布 0.85 剛好壓線（1.16，1.16），給 0.9
+const SCENE = {
+  carpet: { out: [512, 512], scale: 1, region: [2, 2, 1020, 1020], wrap: [1, 1], fade: [64, 64], quality: QUALITY },
+  felt: { out: [512, 512], region: [2, 2, 1020, 1020], wrap: [1, 1], fade: [64, 64], gray: true, quality: 0.9 },
+  leather: { out: [256, 256], region: [2, 2, 1020, 1020], wrap: [1, 1], fade: [32, 32], quality: 0.95 },
+  wood: { out: [512, 128], region: [0, 0, 1536, 1024], wrap: [1, 0], fade: [64, 0], quality: 1 },
+  wall: { out: [512, 166], panels: 2, segment: [4, 1.3], quality: 0.95 },
+};
+const SCENE_NAMES = Object.keys(SCENE);
 
 // 原圖與這支的內容一起算雜湊，寫進產出檔；tests/check_table_art.js 拿同一支比對，對不上就是改了沒重跑
 function sourceHash({ script = fs.readFileSync(__filename, 'utf8'), dir = FIX } = {}) {
@@ -163,6 +181,126 @@ const lobbyWork = (src, cfg) => `(async () => {
     wall: +(wall / cut).toFixed(4), focus: +(focus / cut).toFixed(4), profile };
 })()`;
 
+// 佈景材質：從原圖裁一塊縮到產出大小，量左右（與上下）接回來那條縫的落差；不夠平就多裁一條 fade 寬，
+// 把接在最後一欄後面的那條跟開頭那條交疊（亮度起伏照兩條的相關係數補回來，交疊處不會變糊變平）。
+// 牆板是一塊鑲板：照一段的比例並排兩塊，橫向多拉的那一點記下來；接回來那條縫就是兩塊鑲板的接合處，跟一段中間那條同一種
+const SEAM_JS = `
+  const L = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  // 每一對相鄰的欄（axis 0）或列（axis 1）算平均亮度差，除以內部全部相鄰對的平均：r 是最後一條接回第一條那一對
+  // （at 給了就量 at-1 與 at 那一對，牆板中間的接合處），p99 是內部相鄰對的第 99 百分位。r 不超過 p99 就是圖裡本來就有的落差
+  function seam(d, W, H, axis, at) {
+    const px = (x, y) => L(d, (y * W + x) * 4), n = axis === 0 ? H : W, len = axis === 0 ? W : H;
+    const pair = (i, j) => { let s = 0; for (let k = 0; k < n; k++) s += axis === 0 ? Math.abs(px(i, k) - px(j, k)) : Math.abs(px(k, i) - px(k, j)); return s / n; };
+    const inner = [];
+    for (let i = 1; i < len; i++) inner.push(pair(i - 1, i));
+    const mean = inner.reduce((a, b) => a + b, 0) / inner.length, sorted = inner.map(v => v / mean).sort((a, b) => a - b);
+    return { r: +((at ? pair(at - 1, at) : pair(len - 1, 0)) / mean).toFixed(2), p99: +sorted[Math.floor(sorted.length * 0.99)].toFixed(2) };
+  }`;
+
+const sceneWork = (src, cfg) => `(async () => {
+  ${HELPERS}
+  ${SEAM_JS}
+  const CFG = ${JSON.stringify(cfg)};
+  const img = await load(${JSON.stringify(src)});
+  const IW = img.naturalWidth, IH = img.naturalHeight, [W, H] = CFG.out;
+  const pixels = async (sx, sy, sw, sh, w, h) => {
+    const bmp = await createImageBitmap(img, sx, sy, sw, sh, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+    const c = canvas(w, h), ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    return ctx.getImageData(0, 0, w, h).data;
+  };
+  // 編碼完解回來再量一次：有損壓縮會動到邊上的像素，量的要是畫面真正拿到的那一份
+  const done = async (d, w, h, extra, measure) => {
+    const c = canvas(w, h);
+    c.getContext('2d').putImageData(new ImageData(d, w, h), 0, 0);
+    const out = await encode(c, CFG.quality), back = await load(out.url);
+    const b = canvas(w, h).getContext('2d', { willReadFrequently: true });
+    b.drawImage(back, 0, 0);
+    return { ...out, src: [IW, IH], ...extra, ...measure(b.getImageData(0, 0, w, h).data) };
+  };
+
+  if (CFG.panels) {
+    const pw = W / CFG.panels, d = new Uint8ClampedArray(W * H * 4);
+    const one = await pixels(0, 0, IW, IH, pw, H);
+    for (let y = 0; y < H; y++) for (let p = 0; p < CFG.panels; p++) d.set(one.subarray(y * pw * 4, (y + 1) * pw * 4), (y * W + p * pw) * 4);
+    // 一段在世界裡是 segment 寬高，一塊鑲板佔 1/panels 寬；比原圖的寬高比多出來的就是橫向拉的
+    const [sw, sh] = CFG.segment, stretch = (sw / CFG.panels / sh) / (IW / IH) - 1;
+    return done(d, W, H, { stretch: +(stretch * 100).toFixed(2) }, e => ({ seam: [seam(e, W, H, 0)], joint: seam(e, W, H, 0, pw) }));
+  }
+
+  // 倍率：產出加上交疊那一條要塞得進可用範圍（原寸的不縮）
+  const [rx, ry, rw, rh] = CFG.region, [fx, fy] = CFG.fade;
+  const k = CFG.scale || Math.max((W + fx) / rw, (H + fy) / rh);
+  const crop = (w, h) => { const sw = Math.round(w / k), sh = Math.round(h / k); return [rx + Math.round((rw - sw) / 2), ry + Math.round((rh - sh) / 2), sw, sh]; };
+  // 先量不處理的：照產出大小裁、縮
+  const plain = await pixels(...crop(W, H), W, H);
+  const raw = [0, 1].map(a => CFG.wrap[a] ? seam(plain, W, H, a) : null);
+  const need = [0, 1].map(a => CFG.wrap[a] && raw[a].r > raw[a].p99);
+  let d = plain;
+  if (need[0] || need[1]) {
+    const gw = W + (need[0] ? fx : 0), gh = H + (need[1] ? fy : 0);
+    d = await pixels(...crop(gw, gh), gw, gh);
+    let w = gw, h = gh;
+    if (need[0]) { d = fade(d, w, h, 0, fx); w -= fx; }
+    if (need[1]) { d = fade(d, w, h, 1, fy); h -= fy; }
+  }
+  let mean = 0;
+  if (CFG.gray) {
+    // 絨布只取明暗：每個像素換成灰階 128 × 亮度 ÷ 平均亮度，textures.js 用 overlay 疊上去，128 的地方顏色不變
+    for (let i = 0; i < d.length; i += 4) mean += L(d, i);
+    mean /= d.length / 4;
+    for (let i = 0; i < d.length; i += 4) { const g = 128 * L(d, i) / mean; d[i] = d[i + 1] = d[i + 2] = g; d[i + 3] = 255; }
+  }
+  return done(d, W, H, { scale: +k.toFixed(4), crop: crop(W, H), raw, faded: need, mean: +mean.toFixed(1) },
+    e => ({ seam: [0, 1].map(a => CFG.wrap[a] ? seam(e, W, H, a) : null) }));
+
+  // 交疊：輸出少 w 條；前 w 條由「接在最後一條後面的那條 A」漸變到「開頭那條 B」
+  function fade(src, w0, h0, axis, w) {
+    const N = (axis === 0 ? w0 : h0) - w, ow = axis === 0 ? N : w0, oh = axis === 0 ? h0 : N;
+    const at = (x, y) => (y * w0 + x) * 4;
+    const pairs = [];
+    for (let y = 0; y < (axis === 0 ? h0 : w); y++) for (let x = 0; x < (axis === 0 ? w : w0); x++) {
+      pairs.push(axis === 0 ? [at(x + N, y), at(x, y)] : [at(x, y + N), at(x, y)]);
+    }
+    const mA = [0, 0, 0], mB = [0, 0, 0];
+    for (const [a, b] of pairs) for (let c = 0; c < 3; c++) { mA[c] += src[a + c]; mB[c] += src[b + c]; }
+    for (let c = 0; c < 3; c++) { mA[c] /= pairs.length; mB[c] /= pairs.length; }
+    const lA = L(mA, 0), lB = L(mB, 0);
+    let sab = 0, saa = 0, sbb = 0;
+    for (const [a, b] of pairs) { const da = L(src, a) - lA, db = L(src, b) - lB; sab += da * db; saa += da * da; sbb += db * db; }
+    const rho = sab / Math.sqrt(saa * sbb);
+    const out = new Uint8ClampedArray(ow * oh * 4);
+    for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+      const i = axis === 0 ? x : y, o = (y * ow + x) * 4, b = at(x, y);
+      if (i >= w) { for (let c = 0; c < 4; c++) out[o + c] = src[b + c]; continue; }
+      const t = (i + 0.5) / w, a = axis === 0 ? at(x + N, y) : at(x, y + N);
+      const gain = 1 / Math.sqrt((1 - t) ** 2 + t ** 2 + 2 * t * (1 - t) * rho);
+      for (let c = 0; c < 3; c++) out[o + c] = (1 - t) * mA[c] + t * mB[c] + ((1 - t) * (src[a + c] - mA[c]) + t * (src[b + c] - mB[c])) * gain;
+      out[o + 3] = 255;
+    }
+    return out;
+  }
+})()`;
+
+// 佈景五張的產出各自平鋪（牆板橫向接兩段），看接縫用
+const tilesWork = items => `(async () => {
+  ${HELPERS}
+  const ITEMS = ${JSON.stringify(items)};
+  const imgs = [];
+  for (const it of ITEMS) imgs.push(await load(it.url));
+  const gap = 16, rows = imgs.map(i => i.naturalHeight * (i.naturalWidth > 2 * i.naturalHeight ? 1 : 2));
+  const c = canvas(Math.max(...imgs.map(i => i.naturalWidth * 2)) + 2 * gap, rows.reduce((s, h) => s + h + gap, gap));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#212C31'; ctx.fillRect(0, 0, c.width, c.height);
+  let y = gap;
+  imgs.forEach((im, k) => {
+    const ny = rows[k] / im.naturalHeight;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < ny; j++) ctx.drawImage(im, gap + i * im.naturalWidth, y + j * im.naturalHeight);
+    y += rows[k] + gap;
+  });
+  return c.toDataURL('image/png');
+})()`;
+
 // 對照圖：籌碼五張、牌背、大廳各縮一份並排，標上量到的東西
 const sheetWork = (items, cfg) => `(async () => {
   ${HELPERS}
@@ -209,6 +347,9 @@ async function main() {
       lobby: { src: url('room_art/lobby.webp'), wallSrc: got.lobby.wallSrc, focusSrc: got.lobby.focusSrc },
     }, cfg), 60000);
     fs.writeFileSync(path.join(OUT, 'table-art-marks.png'), b64(sheet));
+    got.scene = {};
+    for (const name of SCENE_NAMES) got.scene[name] = await page.evaluate(sceneWork(url(`scene_art/${name}.webp`), SCENE[name]), 120000);
+    fs.writeFileSync(path.join(OUT, 'scene-art-tiles.png'), b64(await page.evaluate(tilesWork(SCENE_NAMES.map(n => ({ url: got.scene[n].url }))), 60000)));
     return got;
   });
   for (const line of r.console) console.log(`  主控台：${line}`);
@@ -231,6 +372,18 @@ async function main() {
     if (g.inner < 0.4 || g.inner > 0.8) throw new Error(`chip ${v}：中央空白量到 ${g.inner}R，量法不適用這張圖`);
     if (g.duty < 0.15 || g.duty > 0.5) throw new Error(`chip ${v}：嵌片佔邊環 ${g.duty}，量法不適用這張圖`);
   }
+  const axes = v => v.map((s, a) => (s === null ? null : `${a ? '上下' : '左右'} ${s.r}（內部 P99 ${s.p99}）`)).filter(Boolean).join('、');
+  for (const name of SCENE_NAMES) {
+    const g = got.scene[name];
+    if (SCENE[name].panels) {
+      console.log(`${name}：${g.size.join('×')}（鑲板 ${SCENE[name].panels} 塊並排，橫向拉 ${g.stretch}%）、WebP ${kb(g.url)} KB；接回來那條縫 ${g.seam[0].r}、一段中間的接合處 ${g.joint.r}（內部相鄰像素差平均的倍數）`);
+      if (Math.abs(g.seam[0].r / g.joint.r - 1) > 0.25) throw new Error(`${name}：接回來那條縫 ${g.seam[0].r} 跟中間的接合處 ${g.joint.r} 不是同一種`);
+      continue;
+    }
+    console.log(`${name}：${g.size.join('×')}、裁原圖 ${g.crop.join(', ')}（倍率 ${g.scale}）、WebP ${kb(g.url)} KB；接縫（內部相鄰像素差平均的倍數）不處理 ${axes(g.raw)} → 產出解回來 ${axes(g.seam)}` +
+      `${g.faded.some(Boolean) ? `，交疊 ${g.faded.map((f, a) => (f ? `${a ? '上下' : '左右'} ${SCENE[name].fade[a]}` : '')).filter(Boolean).join('、')}` : '，不必處理'}${SCENE[name].gray ? `；只取明暗，原圖平均亮度 ${g.mean}` : ''}`);
+    for (const s of g.seam) if (s !== null && s.r > s.p99) throw new Error(`${name}：產出的接縫 ${s.r} 超過內部相鄰像素差的 P99 ${s.p99}`);
+  }
   if (L.wall < 0.8) throw new Error(`大廳的牆線只在裁切高度的 ${L.wall}，門檻 dark 不適用這張圖`);
   if (LOBBY_FOCUS >= L.wallSrc) throw new Error(`大廳的構圖中心 ${LOBBY_FOCUS} 在牆線 ${L.wallSrc} 下面，原圖換過就重量 LOBBY_FOCUS`);
 
@@ -238,12 +391,14 @@ async function main() {
     const { url: u, inner, center, base, stripe, phase, duty } = got.chips[v];
     return `        ${v}: { inner: ${inner}, center: '${center}', base: '${base}', stripe: '${stripe}', phase: ${phase}, duty: ${duty}, image: '${u}' },`;
   };
-  const js = `// 由 tools/make_table_art.js 產生，不准手改：牌面人物、牌背、籌碼頂面、大廳的點陣插畫（WebP，品質 ${QUALITY}）。
-// 原圖在 tests/fixtures/card_art、chip_art、room_art。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
+  const sceneLine = n => `      ${n}: { size: ${JSON.stringify(got.scene[n].size)}, image: '${got.scene[n].url}' },`;
+  const js = `// 由 tools/make_table_art.js 產生，不准手改：牌面人物、牌背、籌碼頂面、大廳、佈景材質的點陣插畫（WebP，品質 ${QUALITY}）。
+// 原圖在 tests/fixtures/card_art、chip_art、room_art、scene_art。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
 // source 是原圖與產生器的雜湊：換了原圖或改了產生器卻沒重跑，tests/check_table_art.js 會紅。
 // court：J、Q、K 的人物（左右鏡像過），${COURT.join('×')}；back：牌背，${CARD.join('×')}，hole 是中央空圓 [圓心 x, y, 半徑 x, y]（牌面像素）；
 // chips：頂面 ${CHIP}×${CHIP}，values 照面額，inner 是中央空白的半徑（盤面半徑的比例），base／stripe 是邊環的底色與嵌片色，phase 是第一片嵌片的方位（度，0＝右、逆時針），duty 是嵌片佔邊環的比例；
-// lobby：大廳，wall 是牆線、focus 是構圖中心（都是圖高的比例）
+// lobby：大廳，wall 是牆線、focus 是構圖中心（都是圖高的比例）；
+// scene：佈景材質，都已處理成可平鋪：carpet 地毯一格、felt 絨布的明暗（灰階，128＝不變）、leather 扶手、wood 桌身、wall 牆板一段（鑲板兩塊）
 (function () {
   const BJK = (window.BJK = window.BJK || {});
   const V = (BJK.view = BJK.view || {});
@@ -263,11 +418,16 @@ ${CHIPS.map(chipLine).join('\n')}
       },
     },
     lobby: { size: ${JSON.stringify(L.size)}, wall: ${L.wall}, focus: ${L.focus}, image: '${L.url}' },
+    scene: {
+${SCENE_NAMES.map(sceneLine).join('\n')}
+    },
   };
 })();
 `;
   fs.writeFileSync(TARGET, js);
-  const all = [...COURTS.map(n => got.court[n]), got.back, ...CHIPS.map(v => got.chips[v]), L];
+  const scene = SCENE_NAMES.map(n => got.scene[n]);
+  console.log(`佈景五張：WebP ${scene.reduce((s, g) => s + kb(g.url), 0)} KB、解碼後 ${(scene.reduce((s, g) => s + g.size[0] * g.size[1] * 4, 0) / 1e6).toFixed(2)} MB、解碼 ${scene.reduce((s, g) => s + g.decodeMs, 0).toFixed(0)} ms`);
+  const all = [...COURTS.map(n => got.court[n]), got.back, ...CHIPS.map(v => got.chips[v]), L, ...scene];
   const bin = all.reduce((s, g) => s + b64(g.url).length, 0);
   const px = all.reduce((s, g) => s + g.size[0] * g.size[1] * 4, 0);
   console.log(`✔ 寫入 ${path.relative(process.cwd(), TARGET)}：${Math.round(Buffer.byteLength(js) / 1024)} KB（WebP 本身 ${Math.round(bin / 1024)} KB）；` +
@@ -275,4 +435,4 @@ ${CHIPS.map(chipLine).join('\n')}
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { COURTS, CHIPS, CARD, COURT, CHIP, FIX, DIRS, TARGET, sourceHash };
+module.exports = { COURTS, CHIPS, CARD, COURT, CHIP, SCENE, SCENE_NAMES, FIX, DIRS, TARGET, sourceHash };

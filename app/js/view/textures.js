@@ -1,5 +1,6 @@
-// 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 畫；J、Q、K 的人物、牌背、籌碼頂面、牆後的大廳貼的是使用者用 GPT 生的
-// 點陣插畫（table_art.js），角標、面額、牌背中央的 21 仍由這裡寫上去。
+// 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 畫；J、Q、K 的人物、牌背、籌碼頂面、牆後的大廳、地毯、牆板、桌身木頭、
+// 皮革扶手、絨布的質感貼的是使用者用 GPT 生的點陣插畫（table_art.js），角標、面額、牌背中央的 21、明暗、縫線、亮漆、
+// 壁燈暖光、絨布上的金線與字仍由這裡畫上去。
 // 光澤、暗角、高光也一律畫進貼圖：開頁畫一次，之後每一格都不必再算，手機才省電（使用者 2026-10-31 選的做法）
 (function () {
   const BJK = (window.BJK = window.BJK || {});
@@ -54,6 +55,7 @@
     decode('back', ART.back.image),
     ...Object.entries(ART.chips.values).map(([value, c]) => decode(`chip${value}`, c.image)),
     decode('lobby', ART.lobby.image),
+    ...Object.entries(ART.scene).map(([name, s]) => decode(`scene_${name}`, s.image)),
   ]).then(failed => {
     failed = failed.filter(Boolean);
     if (failed.length) console.warn(`這台瀏覽器解不開插畫（${failed.join('、')}），改用純色`);
@@ -75,6 +77,31 @@
     if (!artDone) later.push(() => { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, w, h); draw(ctx); t.dispose(); t.needsUpdate = true; });
     return t;
   }
+
+  // 佈景插畫的亮度倍數（canvas 的 sRGB 值相乘）：使用者要佈景壓暗、不搶牌桌，畫面上每種材質跟 canvas 版同一級——
+  // 亮度（luma）不比 canvas 版亮、最亮那個色道不比它暗。木頭是深紅，照亮度對齊要乘 10 倍、紅色道整片爆掉，所以只對齊最亮的色道。
+  // 2026-11-18 照 tests/check_textures.js 的量法（只留那一種材質再畫一次）調的，數字見 docs\版本紀錄.md v0.22.0
+  const TONE = { carpet: 0.75, wall: 1, leather: 2.8, wood: 3.7 };
+  // 插畫從原點起鋪滿，亮度乘 k：k < 1 蓋一層黑，k > 1 用 lighter 再疊
+  function fillArt(ctx, img, w, h, k) {
+    const p = ctx.createPattern(img, 'repeat');
+    ctx.save();
+    ctx.fillStyle = p; ctx.fillRect(0, 0, w, h);
+    if (k < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - k})`; ctx.fillRect(0, 0, w, h); }
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = p;
+    for (let r = k - 1; r > 0; r--) { ctx.globalAlpha = Math.min(1, r); ctx.fillRect(0, 0, w, h); }
+    ctx.restore();
+  }
+  // 舊版漸層的明暗搬到插畫上：每一站換成灰階（那一站的亮度 ÷ 最亮那一站），用 multiply 乘上去
+  function shade(ctx, w, h, stops, mode) {
+    const g = ctx.createLinearGradient(0, 0, 0, h), top = Math.max(...stops.map(([, c]) => luma(c)));
+    stops.forEach(([at, c]) => { const v = Math.round(255 * luma(c) / top); g.addColorStop(at, mode ? `rgb(${v},${v},${v})` : c); });
+    ctx.save();
+    if (mode) ctx.globalCompositeOperation = mode;
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+  function luma(hex) { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); }
 
   // 燙金：沿 (x0,y0)-(x1,y1) 明暗交錯 times 輪，線條與字看起來才像金屬箔，不是一條淺色。
   // 漸層跟著畫布座標走，translate 過的字吃不到，所以絨布上的金色先畫成白的、再整層上色（見 felt）
@@ -120,16 +147,20 @@
   }
 
   // 半圓絨布：畫布上緣＝荷官那條直邊，下緣＝最靠近玩家的弧頂；1 單位＝H/R 像素
-  function felt(R, seatDeg, seatR, playerSeat) {
-    const W = 2048, H = 1024, s = H / R, cx = W / 2, cy = 0;
-    const c = canvas(W, H), ctx = c.getContext('2d');
+  const FELT = [2048, 1024];
+  function felt(ctx, R, seatDeg, seatR, playerSeat) {
+    const [W, H] = FELT, s = H / R, cx = W / 2, cy = 0;
     // 燈照到的中央偏亮、往桌緣沉下去
     const base = ctx.createRadialGradient(cx, H * 0.42, R * s * 0.1, cx, H * 0.42, R * s * 1.1);
     base.addColorStop(0, '#118460'); base.addColorStop(0.5, V.COLORS.felt); base.addColorStop(1, '#05402f');
     ctx.fillStyle = base;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = ctx.createPattern(grain(26), 'repeat');
+    // 絨布插畫是正綠的，只拿它的明暗（灰階，128＝不變）用 overlay 疊上去，顏色維持原本的青綠、跟桌緣 0x08503a 接得起來
+    ctx.save();
+    if (art.scene_felt) ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = ctx.createPattern(art.scene_felt || grain(26), 'repeat');
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
 
     // 押注圈裡的底色在金線下面
     seatDeg.forEach((deg, i) => {
@@ -171,7 +202,6 @@
     ctx.shadowOffsetY = 2.5;
     ctx.drawImage(layer, 0, 0);
     ctx.shadowColor = 'transparent';
-    return toTexture(c);
   }
 
   // ---- 牌 ----
@@ -370,7 +400,6 @@
   // 條紋對齊頂面的嵌片，疊起來看是同一片嵌片從頂面延伸到側邊
   const CHIP = ART.chips.values;
   V.CHIP_COLORS = Object.fromEntries(Object.entries(CHIP).map(([value, c]) => [value, c.base]));
-  const luma = hex => { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };
 
   function chipSide(value) {
     const C = CHIP[value], c = canvas(256, 32), ctx = c.getContext('2d');
@@ -419,32 +448,46 @@
   }
 
   // ---- 桌緣（table.js）----
-  // 皮革扶手：v＝0.75 是頂上、0.5 是朝桌內。高光畫在頂上偏桌內那側，兩條縫線跟著走
-  function leather() {
-    const W = 512, H = 128, c = canvas(W, H), ctx = c.getContext('2d');
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#1d120c'); g.addColorStop(0.15, '#3b261a'); g.addColorStop(0.24, '#6a4630');
-    g.addColorStop(0.32, '#38241a'); g.addColorStop(0.5, '#1a100b'); g.addColorStop(0.75, '#0f0906'); g.addColorStop(1, '#1d120c');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = ctx.createPattern(grain(22), 'repeat');
-    ctx.fillRect(0, 0, W, H);
-    for (const y of [H * 0.09, H * 0.41]) {
-      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, y - 1, W, 3);
-      ctx.fillStyle = 'rgba(214,190,140,0.75)';
-      for (let x = 0; x < W; x += 24) ctx.fillRect(x, y, 15, 1);
-    }
-    const t = toTexture(c);
+  // 平鋪的貼圖：插畫解碼前先畫 canvas 版，好了補畫（painted）
+  function tiling(w, h, draw, repeat, both) {
+    const t = painted(w, h, draw);
     t.wrapS = THREE.RepeatWrapping;
-    t.repeat.set(10, 1);
+    if (both) t.wrapT = THREE.RepeatWrapping;
+    if (repeat) t.repeat.set(...repeat);
     return t;
   }
 
+  // 皮革扶手：v＝0.75 是頂上、0.5 是朝桌內（畫布由上往下是 v 從 1 到 0，上下接得起來）。高光畫在頂上偏桌內那側，兩條縫線跟著走。
+  // 一個重複是半圈弧長的 1/12（1.34 單位）乘管的一圈（1.38 單位），畫布用正方形，皮紋才不會被拉長
+  const LEATHER_REPEAT = 12;
+  const LEATHER_STOPS = [[0, '#1d120c'], [0.15, '#3b261a'], [0.24, '#6a4630'], [0.32, '#38241a'], [0.5, '#1a100b'], [0.75, '#0f0906'], [1, '#1d120c']];
+  function leather(ctx) {
+    const [W, H] = ART.scene.leather.size, img = art.scene_leather;
+    if (img) fillArt(ctx, img, W, H, TONE.leather);
+    shade(ctx, W, H, LEATHER_STOPS, img && 'multiply');
+    if (!img) { ctx.fillStyle = ctx.createPattern(grain(22), 'repeat'); ctx.fillRect(0, 0, W, H); }
+    // 一圈 16 針、針距 16 像素：落在整數像素上，接回來那一針跟其他針一樣利，不會多一道邊
+    for (const y of [H * 0.09, H * 0.41]) {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, y - H / 128, W, 3 * H / 128);
+      ctx.fillStyle = 'rgba(214,190,140,0.75)';
+      for (let i = 0; i < 16; i++) ctx.fillRect(i * W / 16, y, Math.round(0.62 * W / 16), H / 128);
+    }
+  }
+
   // 桌身木頭：紅木紋，上緣一道亮漆
-  function wood() {
-    const W = 512, H = 128, c = canvas(W, H), ctx = c.getContext('2d');
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#6a4128'); g.addColorStop(0.14, '#b98054'); g.addColorStop(0.3, '#6e4429'); g.addColorStop(1, '#2e1a10');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const WOOD_STOPS = [[0, '#6a4128'], [0.14, '#b98054'], [0.3, '#6e4429'], [1, '#2e1a10']];
+  function wood(ctx) {
+    const [W, H] = ART.scene.wood.size, img = art.scene_wood;
+    if (img) {
+      fillArt(ctx, img, W, H, TONE.wood);
+      shade(ctx, W, H, WOOD_STOPS, 'multiply');
+      // 亮漆：明暗只會壓暗，那一道反光另外用 screen 提亮
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0.04, 'rgba(255,225,195,0)'); g.addColorStop(0.14, 'rgba(255,225,195,0.28)'); g.addColorStop(0.26, 'rgba(255,225,195,0)');
+      ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); ctx.restore();
+      return;
+    }
+    shade(ctx, W, H, WOOD_STOPS);
     const rng = V.rng(53);
     for (let i = 0; i < 70; i++) {
       ctx.strokeStyle = `rgba(${rng() < 0.6 ? '20,8,2' : '200,140,90'},${0.06 + rng() * 0.12})`;
@@ -452,10 +495,6 @@
       const y = rng() * H, b = rng() * 8 - 4;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(W / 3, y + b, 2 * W / 3, y - b, W, y); ctx.stroke();
     }
-    const t = toTexture(c);
-    t.wrapS = THREE.RepeatWrapping;
-    t.repeat.set(6, 1);
-    return t;
   }
 
   // 棄牌盒的壓克力：幾乎透明，四邊一道亮線、一道斜反光
@@ -469,7 +508,7 @@
     return toTexture(c);
   }
 
-  // ---- 佈景（room.js）：使用者要求整體壓暗，花紋只比底色亮一點點 ----
+  // ---- 佈景（room.js）：使用者要求整體壓暗；插畫的亮度照 canvas 版調（TONE），canvas 版的花紋只比底色亮一點點 ----
   // 牌桌在地毯上的影子：畫布上緣＝桌子直邊，下緣＝弧頂再往外 pad 單位
   function tableShadow(R, pad) {
     const H = 256, s = H / (R + pad), W = 2 * H, c = canvas(W, H), ctx = c.getContext('2d');
@@ -479,9 +518,10 @@
     return toTexture(c);
   }
 
-  // 地毯一格：四邊的圖案對得上，鋪滿地板看不出接縫
-  function carpet() {
-    const S = 512, c = canvas(S, S), ctx = c.getContext('2d');
+  // 地毯一格：四邊的圖案對得上，鋪滿地板看不出接縫（插畫的接縫由產生器處理過）
+  function carpet(ctx) {
+    const [S] = ART.scene.carpet.size;
+    if (art.scene_carpet) { fillArt(ctx, art.scene_carpet, S, S, TONE.carpet); return; }
     ctx.fillStyle = '#1b1115'; ctx.fillRect(0, 0, S, S);
     ctx.strokeStyle = 'rgba(201,162,39,0.1)'; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.moveTo(S / 2, 0); ctx.lineTo(S, S / 2); ctx.lineTo(S / 2, S); ctx.lineTo(0, S / 2); ctx.closePath(); ctx.stroke();
@@ -496,14 +536,25 @@
         ctx.beginPath(); ctx.ellipse(x + 36 * Math.cos(a), y + 36 * Math.sin(a), 13, 5, a, 0, 2 * Math.PI); ctx.fill();
       }
     }
-    const t = toTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    return t;
   }
 
-  // 隔間木牆板一段：兩塊凸起的鑲板，左右接起來是連續的；一段一盞壁燈，暖光畫進木頭裡
-  function woodPanel() {
-    const W = 1024, H = 320, c = canvas(W, H), ctx = c.getContext('2d');
+  // 隔間木牆板一段（room.js：4×1.3 單位）：兩塊凸起的鑲板，左右接起來是連續的；一段一盞壁燈，暖光畫進木頭裡、下緣一條暗帶
+  function woodPanel(ctx) {
+    const [W, H] = ART.scene.wall.size;
+    if (art.scene_wall) fillArt(ctx, art.scene_wall, W, H, TONE.wall);
+    else { ctx.save(); ctx.scale(W / 1024, H / 320); panelsDrawn(ctx); ctx.restore(); }
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, H * (1 - 28 / 320), W, H * 28 / 320);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const x of [0, W]) {
+      const g = ctx.createRadialGradient(x, 0, 0, x, 0, W * 260 / 1024);
+      g.addColorStop(0, 'rgba(255,180,100,0.3)'); g.addColorStop(1, 'rgba(255,180,100,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // 插畫解不開時的鑲板：程式畫的木紋與兩塊凸起的板（1024×320 的座標）
+  function panelsDrawn(ctx) {
+    const W = 1024, H = 320;
     ctx.fillStyle = '#2e1c13'; ctx.fillRect(0, 0, W, H);
     const rng = V.rng(11);
     for (let i = 0; i < 160; i++) {
@@ -521,18 +572,7 @@
       ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.beginPath(); ctx.moveTo(x0 + w, y0); ctx.lineTo(x0 + w, y0 + h); ctx.lineTo(x0, y0 + h); ctx.stroke();
     }
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, H - 28, W, 28);
     ctx.fillStyle = 'rgba(255,214,170,0.1)'; ctx.fillRect(0, 12, W, 6);
-    ctx.globalCompositeOperation = 'lighter';
-    for (const x of [0, W]) {
-      const g = ctx.createRadialGradient(x, 0, 0, x, 0, 260);
-      g.addColorStop(0, 'rgba(255,180,100,0.3)'); g.addColorStop(1, 'rgba(255,180,100,0)');
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    const t = toTexture(c);
-    t.wrapS = THREE.RepeatWrapping;
-    return t;
   }
 
   // 黃銅扶手：環繞圓柱一圈的明暗，u＝0 朝鏡頭、0.25 朝上，亮帶落在前上方
@@ -570,7 +610,8 @@
   }
 
   V.textures = {
-    felt,
+    // 同一張桌子只有一張絨布，第二次呼叫拿到的是同一張（探針靠它取絨布）
+    felt: (R, seatDeg, seatR, playerSeat) => cached('felt', () => painted(...FELT, ctx => felt(ctx, R, seatDeg, seatR, playerSeat))),
     // 插畫全解碼完（解不開的已經改用純色）、要補畫的都補畫好了
     ready,
     CHIP_ATLAS: { top: 256 / ATLAS_H, side: 32 / ATLAS_H },
@@ -583,12 +624,12 @@
     chipAtlas: value => cached(`atlas-${value}`, () => painted(256, ATLAS_H, ctx => chipAtlas(ctx, value))),
     // showcase.js 的大特效拿它的畫布當噴出來的籌碼
     chipTop: value => cached(`top-${value}`, () => painted(256, 256, ctx => chipTop(ctx, value))),
-    leather: () => cached('leather', leather),
-    wood: () => cached('wood', wood),
+    leather: () => cached('leather', () => tiling(...ART.scene.leather.size, leather, [LEATHER_REPEAT, 1], true)),
+    wood: () => cached('wood', () => tiling(...ART.scene.wood.size, wood, [6, 1])),
     glass: () => cached('glass', glass),
     white: () => cached('white', white),
-    carpet: () => cached('carpet', carpet),
-    woodPanel: () => cached('woodPanel', woodPanel),
+    carpet: () => cached('carpet', () => tiling(...ART.scene.carpet.size, carpet, null, true)),
+    woodPanel: () => cached('woodPanel', () => tiling(...ART.scene.wall.size, woodPanel)),
     tableShadow: (R, pad) => cached('tableShadow', () => tableShadow(R, pad)),
     brass: () => cached('brass', brass),
     lobby: () => cached('lobby', lobby),
