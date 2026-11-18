@@ -1,6 +1,7 @@
 // 用無頭 Edge 雙擊開 app/index.html 截圖給人看，輸出在 tools/_shots/（不進版控）
 // 用法：node tools/shoot.js [檔名前綴]           桌機 1280×720 與手機 390×844 各一張，外加矮的直式手機 390×720 拉頁收起、拉開各一張
-//       node tools/shoot.js [檔名前綴] --dealer  荷官五種表情各一張（桌機），外加手機一張
+//       node tools/shoot.js [檔名前綴] --dealer  荷官五種表情各一張（桌機），外加手機一張；
+//                                                再加最長那句對白在桌機、390×844、390×720、360×640 各一張（dealer-long-*）
 //       node tools/shoot.js [檔名前綴] --round   照正常速度打一局，桌機與手機各截四個時間點
 //       node tools/shoot.js [檔名前綴] --cards   J、Q、K 與牌背、籌碼的貼圖原寸排一張，中間一排縮成手機上一張牌的大小
 //       以上都可以再加 --classic，改用舊版荷官造型
@@ -8,13 +9,14 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('../tests/browser_util');
-const { DRAWER_SETTLED } = require('../tests/ui_util');
+const { DRAWER_SETTLED, BUBBLE_LINES } = require('../tests/ui_util');
 
 const init = process.argv.includes('--classic') ? `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');` : '';
 const DESKTOP = { size: [1280, 720], mobile: false, init };
 const PHONE = { size: [390, 844], mobile: true, init };
 // 矮的直式（BJK-11）：真手機網址列吃掉一截
 const SHORT_PHONE = { size: [390, 720], mobile: true, init };
+const SMALL_PHONE = { size: [360, 640], mobile: true, init };
 const LINES = {
   idle: '歡迎光臨，請下注！',
   deal: '發牌囉。',
@@ -84,7 +86,9 @@ async function shootRound(browser, url, viewport, tag) {
 
 const jobs = dealerMode
   ? [...Object.keys(LINES).map(mood => ({ name: `dealer-${mood}`, viewport: DESKTOP, mood })),
-     { name: 'dealer-mobile', viewport: PHONE, mood: 'smile' }]
+     { name: 'dealer-mobile', viewport: PHONE, mood: 'smile' },
+     ...Object.entries({ desktop: DESKTOP, mobile: PHONE, short: SHORT_PHONE, small: SMALL_PHONE })
+       .map(([tag, viewport]) => ({ name: `dealer-long-${tag}`, viewport, mood: 'surprised', line: BUBBLE_LINES[0] }))]
   : [{ name: 'desktop', viewport: DESKTOP }, { name: 'mobile', viewport: PHONE },
      { name: 'short', viewport: SHORT_PHONE }, { name: 'short-open', viewport: SHORT_PHONE, open: true }];
 
@@ -116,7 +120,7 @@ const jobs = dealerMode
       await page.evaluate(`(async () => {
         const d = BJK.view.stage.dealer;
         await d.ready;
-        ${job.mood ? `d.setMood(${JSON.stringify(job.mood)}); d.say(${JSON.stringify(LINES[job.mood])});` : ''}
+        ${job.mood ? `d.setMood(${JSON.stringify(job.mood)}); d.say(${JSON.stringify(job.line || LINES[job.mood])});` : ''}
       })()`);
       if (job.open) {
         // 真的點一下左邊的把手，等拉頁的 CSS transition 跑完

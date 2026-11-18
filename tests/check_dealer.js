@@ -1,6 +1,6 @@
 // 守荷官：預設造型的點陣插畫每種表情立牌貼的是自己那張、臉框量在臉上（產出檔本身由 check_dealer_art.js 守）；
 // 對白泡泡在桌機與直式手機（含矮的直式，BJK-11）都要整個在畫面內、不蓋住荷官的臉、而且貼在臉旁邊，講到一半換表情也一樣，
-// 也不跟看得到的按鈕、拉頁把手、版本號疊在一起；
+// 也不跟看得到的按鈕、拉頁把手、版本號疊在一起；凸出泡泡的名牌與尖角也一樣（泡泡的外觀與字型在 check_bubble.js）；
 // 舊版造型五種表情都只有兩隻手（BJK-01）；點荷官換造型；大特寫跟著造型；橫式畫面插畫荷官放大 1.2 倍而框景不變。
 // 驗不到：插畫好不好看、裁得好不好（看 node tools/shoot.js <前綴> --dealer 與 tools/_shots/art-<表情>-marks.png）。
 const test = require('node:test');
@@ -35,12 +35,18 @@ function loadArt() {
 }
 
 // ---- 對白泡泡 ----
-// 畫面上看得到的按鈕、拉頁把手、版本號：收在拉頁裡（看不到、或在畫面外）的不算
-const UI = `[...document.querySelectorAll('#drawerHandle, #soundToggle, #statsBtn, #ver')].map(el => {
+// 畫面上看得到的每一顆按鈕與版本號（不寫死是哪幾顆：之後多的按鈕一樣要讓）：收在拉頁裡（看不到、或在畫面外）、藏起來的不算
+const UI = `[...document.querySelectorAll('button, #ver')].map(el => {
   const r = el.getBoundingClientRect();
-  return { id: el.id, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+  return { id: el.id || el.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
            shown: getComputedStyle(el).visibility === 'visible' && r.width > 0 && r.right > 0 && r.left < innerWidth };
 }).filter(u => u.shown)`;
+// 泡泡本體以外凸出去的部分：壓在框線上的名牌、框線（含尖角）
+const PARTS = `(() => {
+  const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  const b = document.getElementById('bubble');
+  return { plate: box(b.querySelector('.bubble-plate')), frame: box(b.querySelector('.bubble-frame .edge')) };
+})()`;
 async function measure(browser, appDir, viewport) {
   const r = await withPage(browser, viewport, async page => {
     await page.goto(pathToFileURL(path.join(appDir, 'index.html')).href);
@@ -49,7 +55,7 @@ async function measure(browser, appDir, viewport) {
       await d.ready;
       d.say(${JSON.stringify(LONG)});
       const b = document.getElementById('bubble').getBoundingClientRect();
-      return { bubble: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
+      return { bubble: { left: b.left, right: b.right, top: b.top, bottom: b.bottom }, parts: ${PARTS},
                face: d.faceRect(), vw: innerWidth, vh: innerHeight, ui: ${UI} };
     })()`);
   });
@@ -72,6 +78,12 @@ function assertBubble(m) {
   assert.ok(!overlaps(m.bubble, m.face), `泡泡蓋到荷官的臉：${why}`);
   assert.ok(gap(m.bubble, m.face) < 40, `泡泡離荷官的臉太遠，看不出是誰在講話：${why}`);
   assert.deepStrictEqual(m.ui.filter(u => overlaps(m.bubble, u)).map(u => u.id), [], `泡泡跟按鈕、把手或版本號疊在一起：${why}`);
+  // 名牌與尖角凸出泡泡本體，一樣要在畫面內、不蓋臉、不疊按鈕
+  for (const [k, r] of Object.entries(m.parts)) {
+    assert.ok(r.left >= 0 && r.top >= 0 && r.right <= m.vw && r.bottom <= m.vh, `泡泡的 ${k} 超出畫面：${why}`);
+    assert.ok(!overlaps(r, m.face), `泡泡的 ${k} 蓋到荷官的臉：${why}`);
+    assert.deepStrictEqual(m.ui.filter(u => overlaps(r, u)).map(u => u.id), [], `泡泡的 ${k} 跟按鈕、把手或版本號疊在一起：${why}`);
+  }
   if (m.console) assert.deepStrictEqual(m.console, []);
 }
 
@@ -114,7 +126,7 @@ const EACH_MOOD = `(async () => {
   const d = BJK.view.stage.dealer;
   await d.ready;
   const box = () => { const b = document.getElementById('bubble').getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
-  const snap = () => ({ bubble: box(), face: d.faceRect(), vw: innerWidth, vh: innerHeight, ui: ${UI} });
+  const snap = () => ({ bubble: box(), parts: ${PARTS}, face: d.faceRect(), vw: innerWidth, vh: innerHeight, ui: ${UI} });
   const out = {};
   for (const m of Object.keys(BJK.view.dealer.MOODS)) {
     d.setMood(m);
@@ -141,7 +153,7 @@ for (const [name, vp] of [['桌機', DESKTOP], ['直式手機', PHONE], ['矮的
 
 // BJK-11 的兩半：頭頂放不下時夾回頂端（v0.21.0 的做法）會蓋到臉；按鈕與版本號留在上方兩個角落（v0.21.0 的版面）會跟泡泡疊在一起
 test('陽性對照：頭頂放不下時照舊夾回畫面頂端，矮的直式手機上要判成蓋到臉', async () => {
-  const tmp = brokenCopy([[DEALER_JS, '} else if (face.top - gap - h >= m) {', '} else if (true) {']]);
+  const tmp = brokenCopy([[DEALER_JS, '} else if (face.top - gap - h >= m + lift) {', '} else if (true) {']]);
   try {
     const r = (await eachMood(tmp, SHORT_PHONE)).value;
     assert.ok(Object.values(r).some(m => overlaps(m.bubble, m.face)), `破壞後泡泡仍沒蓋到臉，這條判準沒在分辨：${JSON.stringify(r)}`);

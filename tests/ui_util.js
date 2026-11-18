@@ -19,6 +19,18 @@ const PHONE_LANDSCAPE = { size: [844, 390], mobile: true };
 // 全套平行跑、機器忙時滑到一半就讀到位置（2026-11-16 量到版本號 left -3.5）
 const DRAWER_SETTLED = `Promise.all(document.getElementById('drawer').getAnimations({ subtree: true }).map(a => a.finished.catch(() => {}))).then(() => true)`;
 const url = dir => pathToFileURL(path.join(dir, 'index.html')).href;
+// 荷官真的會講的長句（director.js 的樣板填最長的值）與帶刪節號的短句：量泡泡排版、截圖都用這幾句。
+// 第一句最長：預設規則（不偷看、21 點算平手、全收）下荷官最後翻出 Blackjack 時講的
+const BUBBLE_LINES = [
+  '莊家 Blackjack！21 點平手，其餘連加倍、分牌的注一起收。',
+  '籌碼輸光了。按「重新開始」補回 1,000 再來一次。',
+  '第 1、2、3 手 Blackjack 賠 1.5 倍，4 手合計贏了 2400！',
+  '第 2 手：要牌、停牌、加倍，還是分牌？',
+  '歡迎回來，籌碼幫你留著了。請下注！',
+  'Blackjack 賠 1.5 倍，你贏了 1500！',
+  '分牌！每一手照常要牌、停牌。',
+  '洗牌中…',
+];
 const first = () => availableBrowsers()[0];
 
 // 打到輪到你為止（荷官或你拿 Blackjack 那局不會輪到你，就再打一局），量那一刻的標籤與按鈕
@@ -97,4 +109,4 @@ const shownOf = b => Object.fromEntries(Object.entries(b).map(([k, x]) => [k, [x
 // 21 點平手退回加倍後的注（籌碼回到 1,000），同桌三位 19 點輸
 const LATE_BJ = rigInit(['10', '5', '10', '10', 'A', '9', '6', '9', '9', 'K', 'K']);
 
-module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_SETTLED, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };
+module.exports = { APP, DESKTOP, PHONE, SMALL_PHONE, SHORT_PHONE, PHONE_LANDSCAPE, DRAWER_SETTLED, BUBBLE_LINES, url, first, MEASURE_TURN, pairsOverlapping, assertButtonsFit, copyWith, PLAY_UTIL, shownOf, LATE_BJ };

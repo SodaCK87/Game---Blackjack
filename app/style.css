@@ -78,11 +78,13 @@ html, body {
   font-size: 12px;
 }
 
+/* AI 的小對白跟荷官的泡泡用同一套字：tools/make_bubble_font.js 也收了 pop(…) 講的字 */
 .pop {
   padding: 4px 10px;
   border-radius: 10px;
   background: var(--cream);
   color: var(--bg);
+  font-family: "BJK WenKai", var(--font);
   font-size: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   animation: pop-up 1.6s ease-out forwards;
@@ -636,50 +638,85 @@ body[data-fatal] #drawerHandle {
   }
 }
 
-/* 荷官的對白泡泡：位置由 dealer.js 依荷官頭部的螢幕座標算 */
+/* 荷官的對白泡泡：位置由 dealer.js 依荷官頭部的螢幕座標算。深底金框跟牌桌的燙金同一套；
+   框與尖角是 dealer.js 照泡泡大小畫的一條 SVG 線，尖角的底邊沒有框線，看起來是從框裡長出來的 */
 .bubble {
+  --bubble-gold: #d9ae3c;
   position: fixed;
   max-width: min(260px, 64vw);
-  padding: 10px 14px;
-  background: linear-gradient(#fffdf8, #f7f4ec);
-  color: var(--bg);
-  border: 2px solid var(--teal);
-  border-radius: 14px;
-  font: 16px/1.45 "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  padding: 14px 15px 11px;
+  color: var(--cream);
+  font: 17px/1.5 "BJK WenKai", var(--font);
+  letter-spacing: 0.04em;
   pointer-events: none;
-  /* 矮直式手機泡泡只剩 140–190 寬：不平均的話短句會斷成「請下／注！」 */
+  /* 矮直式手機泡泡只剩 140–190 寬：不平均的話短句會斷成「請下／注！」。strict：標點與「…」一律不放行首 */
   text-wrap: balance;
+  line-break: strict;
+  /* 夠寬時只在標點與空格後換行，詞不拆開（「停／牌」）；對白最長的一段約 10 個字，寬泡泡一行放得下 14 個 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 擠在臉旁邊的窄泡泡（dealer.js 縮寬時標 data-narrow）一行只剩 7 個字：一段放不下時 keep-all 的硬斷會把句號擠到行首，
+   改回逐字換行，標點仍照 line-break 不放行首 */
+.bubble[data-narrow] {
+  word-break: normal;
+}
+
+/* 直式手機：臉旁邊只剩 140–160 寬，字小一號、內距收窄，360×640 最長的對白才排得進 5 行、不碰到拉頁把手 */
+@media (max-width: 480px) {
+  .bubble {
+    padding: 13px 11px 9px;
+    font-size: 16px;
+    line-height: 1.45;
+    letter-spacing: 0.02em;
+  }
 }
 
 .bubble[hidden] {
   display: none;
 }
 
-.bubble::after {
-  content: "";
+.bubble-frame {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  background: #f7f4ec;
-  border-left: 2px solid var(--teal);
-  border-bottom: 2px solid var(--teal);
+  left: 0;
+  top: 0;
+  z-index: -1;
+  overflow: visible;
+  /* 大廳背景本來就暗，近的一層壓出邊、遠的一層把整顆泡泡從背景浮起來 */
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
 }
 
-.bubble[data-side="right"]::after {
-  left: -8px;
-  top: calc(50% - 7px);
-  transform: rotate(45deg);
+.bubble-frame .edge {
+  fill: rgba(33, 44, 49, 0.88);
+  stroke: var(--bubble-gold);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }
 
-.bubble[data-side="left"]::after {
-  right: -8px;
-  top: calc(50% - 7px);
-  transform: rotate(-135deg);
+/* 框內側一道暗金線，跟外框一起看像燙金的雙線框 */
+.bubble-frame .inner {
+  fill: none;
+  stroke: rgba(217, 174, 60, 0.32);
+  stroke-width: 1;
 }
 
-.bubble[data-side="top"]::after {
-  bottom: -8px;
-  left: calc(50% - 7px);
-  transform: rotate(-45deg);
+/* 「荷官」名牌：壓在左上角的框線上，一半凸出泡泡頂端（dealer.js 擺位時多留這一截） */
+.bubble-plate {
+  position: absolute;
+  left: 10px;
+  top: -9px;
+  height: 18px;
+  padding: 0 5px 0 7px;
+  border-radius: 3px;
+  background: linear-gradient(#e6c25a, var(--bubble-gold));
+  box-shadow: 0 0 0 1px rgba(33, 44, 49, 0.88), 0 1px 3px rgba(0, 0, 0, 0.5);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.2em;
+}
+
+.bubble-plate::before {
+  content: "荷官";
 }

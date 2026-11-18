@@ -12,6 +12,7 @@
   // src：表情的貼圖網址；head：臉加頭髮的外框（立牌座標 [左, 上, 右, 下]），對白泡泡避開它；portrait：大特寫；line：換上時講的話
   if (!V.dealerClassic) throw new Error('載入順序錯：dealer_classic.js 要排在 dealer.js 之前');
   if (!V.dealerArt) throw new Error('載入順序錯：dealer_art.js 要排在 dealer.js 之前');
+  if (!V.bubbleFont) throw new Error('載入順序錯：lib/bubble_font.js 要排在 dealer.js 之前');
   const ART = V.dealerArt, CLASSIC = V.dealerClassic;
   const classicSvg = (mood, size = `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="${CLASSIC.viewBox}"`) => CLASSIC.draw(mood, size);
   const LOOKS = {
@@ -77,9 +78,49 @@
     return g;
   }
 
+  // 泡泡的框（金邊深底，尖角跟框是同一條線）、壓在框線上的「荷官」名牌、對白。
+  // 名牌的字寫在 CSS 的 content：泡泡的 textContent 只有對白，測試與 aside() 都讀它
+  const SVG = 'http://www.w3.org/2000/svg';
+  function bubbleParts(bubble) {
+    const frame = document.createElementNS(SVG, 'svg'), edge = document.createElementNS(SVG, 'path'), inner = document.createElementNS(SVG, 'rect');
+    frame.setAttribute('class', 'bubble-frame');
+    frame.setAttribute('aria-hidden', 'true');
+    edge.setAttribute('class', 'edge');
+    inner.setAttribute('class', 'inner');
+    frame.append(edge, inner);
+    const plate = document.createElement('span'), words = document.createElement('span');
+    plate.className = 'bubble-plate';
+    plate.setAttribute('aria-hidden', 'true');
+    words.className = 'bubble-text';
+    bubble.replaceChildren(frame, plate, words);
+    return { frame, edge, inner, plate, words };
+  }
+
+  // 框的外形：圓角矩形，side 那一邊挖出尖角指向臉。at 是要指的點（泡泡內的座標），尖角底邊夾在圓角以內、
+  // 尖端最多斜一個尖角長；線畫在框內半個線寬，外緣才剛好是泡泡的邊
+  const R = 6, TAIL = 8, BASE = 7, INSET = 3;
+  function framePath(w, h, side, at, line) {
+    const o = line / 2, x0 = o, y0 = o, x1 = w - o, y1 = h - o;
+    const clampTo = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const arc = (x, y) => `A${R} ${R} 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)}`;
+    const p = (x, y) => `${x.toFixed(2)} ${y.toFixed(2)}`;
+    if (side === 'top') {
+      const c = clampTo(at.x, x0 + R + BASE, x1 - R - BASE), tip = clampTo(at.x, c - TAIL, c + TAIL);
+      return `M${p(x0 + R, y0)}H${(x1 - R).toFixed(2)}${arc(x1, y0 + R)}V${(y1 - R).toFixed(2)}${arc(x1 - R, y1)}` +
+        `H${(c + BASE).toFixed(2)}L${p(tip, y1 + TAIL)}L${p(c - BASE, y1)}H${(x0 + R).toFixed(2)}${arc(x0, y1 - R)}V${(y0 + R).toFixed(2)}${arc(x0 + R, y0)}Z`;
+    }
+    const c = clampTo(at.y, y0 + R + BASE, y1 - R - BASE), tip = clampTo(at.y, c - TAIL, c + TAIL);
+    // right：泡泡在臉的右邊，尖角在左緣；left 反過來
+    const left = side === 'right' ? `V${(c + BASE).toFixed(2)}L${p(x0 - TAIL, tip)}L${p(x0, c - BASE)}` : '';
+    const right = side === 'left' ? `V${(c - BASE).toFixed(2)}L${p(x1 + TAIL, tip)}L${p(x1, c + BASE)}` : '';
+    return `M${p(x0 + R, y0)}H${(x1 - R).toFixed(2)}${arc(x1, y0 + R)}${right}V${(y1 - R).toFixed(2)}${arc(x1 - R, y1)}` +
+      `H${(x0 + R).toFixed(2)}${arc(x0, y1 - R)}${left}V${(y0 + R).toFixed(2)}${arc(x0 + R, y0)}Z`;
+  }
+
   // project(世界座標) → 螢幕 CSS 像素 {x, y}；onChange() 讓場景重畫
   function create({ bubble, project, onChange }) {
     let zoom = 1, landscape = false;
+    const parts = bubbleParts(bubble);
     // 不寫深度：前面的牌與籌碼已經先畫好，擋得住；跟桌上其他透明物共用一支著色器
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false });
     const mesh = new THREE.Mesh(standee(zoom), material);
@@ -92,8 +133,11 @@
 
     const saved = V.hud.loadPrefs().look;
     look = LOOK_NAMES.includes(saved) ? saved : LOOK_NAMES[0];
-    // 牌、籌碼、大廳的插畫（textures.js）也一起等：都解碼好了才露面、重畫那一次，開頁只多畫一格
-    const ready = Promise.all([loadLook(look), V.textures.ready])
+    // 對白字型是非同步載入的：開頁第一句在它載好之前就擺了，量到的是系統字的寬度，載好後照新的字寬重擺一次。
+    // 載不起來時 ready 是 false，泡泡一直用系統字，不必重擺
+    V.bubbleFont.ready.then(ok => { if (ok) placeBubble(); });
+    // 牌、籌碼、大廳的插畫（textures.js）與對白字型也一起等：都好了才露面、重畫那一次，開頁只多畫一格
+    const ready = Promise.all([loadLook(look), V.textures.ready, V.bubbleFont.ready])
       .then(([set]) => {
         textures = set;
         material.map = textures[mood];
@@ -186,12 +230,15 @@
 
     // 頭的右邊放得下就放右邊；放不下（直式手機）就放頭頂正上方；頭頂也放不下（矮的直式手機，頭頂離畫面頂不到一行字），
     // 改放臉旁邊比較寬的那一側、寬度縮到那一側放得下，字多就多排幾行。不夾回頭頂：那樣會蓋到臉
+    // 尖角長 TAIL（8）要比 gap 短，尖端才不會戳進臉框
     function placeBubble() {
       if (bubble.hidden) return;
       const face = faceRect();
       const vw = window.innerWidth, vh = window.innerHeight, gap = 10, m = 8;
+      const lift = -parts.plate.offsetTop;   // 名牌壓在框線上，凸出泡泡頂端這麼多：頂端要多留這一截，名牌才不會被畫面切掉
       // 先回到 CSS 的寬度上限、擺到左上角再量：擺在右緣附近時瀏覽器會把它擠窄，量到的就不是它本來的寬
       bubble.style.maxWidth = '';
+      delete bubble.dataset.narrow;
       bubble.style.left = '0px';
       bubble.style.top = '0px';
       let w = bubble.offsetWidth, h = bubble.offsetHeight, left, top;
@@ -202,7 +249,7 @@
       };
       if (face.right + gap + w <= vw - m) {
         beside('right');
-      } else if (face.top - gap - h >= m) {
+      } else if (face.top - gap - h >= m + lift) {
         left = (face.left + face.right) / 2 - w / 2;
         top = face.top - gap - h;
         bubble.dataset.side = 'top';
@@ -211,16 +258,28 @@
         const side = room.left > room.right ? 'left' : 'right';
         const extra = w - parseFloat(getComputedStyle(bubble).width);   // max-width 只管字那一塊，內距與邊框另外算
         bubble.style.maxWidth = `${Math.floor(Math.min(room[side], w) - extra)}px`;
+        bubble.dataset.narrow = '';
         w = bubble.offsetWidth;
         h = bubble.offsetHeight;
         beside(side);
       }
-      bubble.style.left = `${clamp(left, m, vw - w - m)}px`;
-      bubble.style.top = `${clamp(top, m, vh - h - m)}px`;
+      left = clamp(left, m, vw - w - m);
+      top = clamp(top, m + lift, vh - h - m);
+      bubble.style.left = `${left}px`;
+      bubble.style.top = `${top}px`;
+      // 尖角指向臉的中段（旁邊）或正中（頭頂）；泡泡被夾回畫面內時尖角跟著移，仍對著臉
+      const box = bubble.getBoundingClientRect();
+      const at = { x: (face.left + face.right) / 2 - box.left, y: (face.top + face.bottom) / 2 - box.top };
+      const line = parseFloat(getComputedStyle(parts.edge).strokeWidth) || 1;
+      parts.frame.style.width = `${box.width}px`;
+      parts.frame.style.height = `${box.height}px`;
+      parts.frame.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
+      parts.edge.setAttribute('d', framePath(box.width, box.height, bubble.dataset.side, at, line));
+      for (const [k, v] of Object.entries({ x: INSET, y: INSET, width: box.width - 2 * INSET, height: box.height - 2 * INSET, rx: R - 2 })) parts.inner.setAttribute(k, v);
     }
 
     function show(text) {
-      bubble.textContent = text;
+      parts.words.textContent = text;
       bubble.hidden = false;
       placeBubble();
     }
@@ -242,7 +301,7 @@
 
     // 插一句話，講完放回原本那句：輪到你時的提示不能被換造型蓋掉。中途牌局往下走（say）就不放回去
     function aside(text) {
-      if (!asideTimer) beforeAside = bubble.hidden ? null : bubble.textContent;
+      if (!asideTimer) beforeAside = bubble.hidden ? null : parts.words.textContent;
       clearTimeout(asideTimer);
       show(text);
       asideTimer = setTimeout(() => {
