@@ -20,6 +20,7 @@ description: 這個 repo 要把畫面上某樣東西換成使用者用 GPT 生�
 1. 我叫不動 GPT。分工是我寫提示詞與規格、使用者生圖丟進來、我寫產生器接上。
 2. 候選清單從 `app\js\view\textures.js` 的 `V.textures` 列出來：還在用 `canvas()` 現畫、而且畫面上佔面積的才值得換。已經換掉的看 `tests\fixtures\*_art\`。
 3. 純換貼圖的（材質、牌面）跟會加功能的（例如替 AI 同桌加頭像、要改版面）分開問，後者代價大很多。
+4. 角色類（荷官、人物）的新圖，即使他說「替換」「換掉」，也要先問清楚：是取代舊的，還是多一款可以切換、哪一款當預設。舊角色被整套蓋掉，他到上線後才會發現。
 
 ## 提示詞一次給一整段
 
@@ -31,7 +32,7 @@ description: 這個 repo 要把畫面上某樣東西換成使用者用 GPT 生�
 
 ## 原圖進 fixtures、產生器寫進 `*_art.js`
 
-1. 原圖放 `tests\fixtures\` 底下：荷官在 `dealer_art\`，牌面、牌背、籌碼、大廳、場景材質在 `card_art\`、`chip_art\`、`room_art\`、`scene_art\`。測試拿它算雜湊判過期，所以放 fixtures、不放 `app\img\`。
+1. 原圖放 `tests\fixtures\` 底下：荷官每一款一個資料夾（西裝 `dealer_art\`、旗袍 `dealer_art_qipao\`，新一款就再開一個），牌面、牌背、籌碼、大廳、場景材質在 `card_art\`、`chip_art\`、`room_art\`、`scene_art\`。測試拿它算雜湊判過期，所以放 fixtures、不放 `app\img\`。
 2. 使用者給的 PNG 轉成無損 WebP，解回來逐像素比對相同，然後刪掉 PNG。
 3. 產生器：荷官用 `tools\make_dealer_art.js` 寫 `dealer_art.js`；其餘共用 `tools\make_table_art.js`（新類別加進 `DIRS`）寫 `table_art.js`。不要另開一支，也不准手改產出檔。
 4. ✅ 外部圖檔在 file:// 下上傳 WebGL 會被擋，所以一律縮圖轉成 data: URL 寫進 `.js`。WebP 品質 0.85。
