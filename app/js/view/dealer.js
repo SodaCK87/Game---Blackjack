@@ -19,6 +19,8 @@
     // 點陣插畫（tools/make_dealer_art.js 產生）：每種表情的頭擺的位置都不同，外框與裁切逐張量
     art: {
       src: mood => ART.images[mood],
+      // 前景層：只有發牌那張有（伸到籌碼架上的手和牌），其他表情不畫
+      front: mood => ART.front[mood],
       head: mood => ART.marks[mood].head,
       // rect.face 是五官的位置，看不到；探針量大特寫的大字有沒有壓到它
       portrait: mood => {
@@ -34,6 +36,7 @@
     // 舊版：SVG 畫的，臉框是橢圓，往上多留 20 給頭髮
     classic: {
       src: mood => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(classicSvg(mood)),
+      front: () => undefined,
       head: () => { const { cx, cy, rx, ry } = CLASSIC.head; return [cx - rx, cy - ry - 20, cx + rx, cy + ry]; },
       portrait: mood => classicSvg(mood, `width="100%" height="100%" viewBox="${CLASSIC.crop}"`),
       line: CLASSIC.line,
@@ -47,7 +50,7 @@
   // showcase.js 的荷官大特寫：跟著目前的造型
   const portrait = (mood, name = look) => LOOKS[name].portrait(mood);
 
-  function loadTexture(mood, name) {
+  function loadTexture(mood, name, src = LOOKS[name].src(mood)) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -58,10 +61,15 @@
         resolve(tex);
       };
       img.onerror = () => reject(new Error(`荷官表情「${MOODS[mood]}」的圖載不進來`));
-      img.src = LOOKS[name].src(mood);
+      img.src = src;
     });
   }
-  const loadLook = name => Promise.all(Object.keys(MOODS).map(m => loadTexture(m, name).then(t => [m, t]))).then(Object.fromEntries);
+  // 一套造型：五種表情的本體，加上有前景層的表情各一張（fronts）
+  const loadLook = name => Promise.all(Object.keys(MOODS).map(m => {
+    const src = LOOKS[name].front(m);
+    return Promise.all([loadTexture(m, name), src && loadTexture(m, name, src)]).then(([t, f]) => [m, t, f]);
+  })).then(list => ({ textures: Object.fromEntries(list.map(([m, t]) => [m, t])),
+                     fronts: Object.fromEntries(list.filter(([, , f]) => f).map(([m, , f]) => [m, f])) }));
 
   // 立牌座標 → 立牌本地座標（原點在立牌底邊中央）。zoom 見 standee()
   function local(sx, sy, zoom = 1) {
@@ -75,6 +83,14 @@
     g.translate(0, H / 2, 0);
     const uv = g.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - (1 - uv.getY(i)) / zoom);
+    return g;
+  }
+
+  // 前景層的平面：跟立牌同寬、頂端對齊、每單位高度貼的原圖列數一樣，但不裁下緣（整張原圖）。橫式放大 1.2 倍時立牌只露出
+  // 原圖上面 1／1.2（到第 853 列），發牌那張的牌畫到第 880 列，照立牌裁的話牌底那一截會被切成一條直線
+  function frontPlane(zoom) {
+    const g = new THREE.PlaneGeometry(W * zoom, H * zoom);
+    g.translate(0, H - H * zoom / 2, 0);
     return g;
   }
 
@@ -125,7 +141,16 @@
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false });
     const mesh = new THREE.Mesh(standee(zoom), material);
     mesh.renderOrder = 1;
+    // 前景層：疊在立牌上的第二片（掛在立牌底下，跟著縮放與仰角；平面見 frontPlane），只貼發牌那張的手和牌。不比深度、排在最後畫，
+    // 才蓋得過前面的籌碼架；其他表情整片不畫，不多一個 draw call。直式畫面俯角大，手和牌本來就在籌碼架上方，也不畫：
+    // 疊上去看不出差別，卻要多塗一整片立牌那麼大的面積
+    const frontMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, depthTest: false });
+    const front = new THREE.Mesh(frontPlane(zoom), frontMaterial);
+    front.renderOrder = 2;
+    front.visible = false;
+    mesh.add(front);
     let textures = {};
+    let fronts = {};
     let masks = {};
     let mood = 'idle';
     let hideTimer = null, asideTimer = null, beforeAside = null;
@@ -139,12 +164,23 @@
     // 牌、籌碼、大廳的插畫（textures.js）與對白字型也一起等：都好了才露面、重畫那一次，開頁只多畫一格
     const ready = Promise.all([loadLook(look), V.textures.ready, V.bubbleFont.ready])
       .then(([set]) => {
-        textures = set;
+        ({ textures, fronts } = set);
         material.map = textures[mood];
         material.visible = true;
         material.needsUpdate = true;
+        showFront();
         onChange();
       });
+
+    // 這個表情有前景層、而且是橫式畫面就貼上、露出來，否則整片收起來
+    function showFront() {
+      const tex = fronts[mood];
+      if (tex && frontMaterial.map !== tex) {
+        frontMaterial.map = tex;
+        frontMaterial.needsUpdate = true;
+      }
+      front.visible = !!tex && landscape;
+    }
 
     // 新的五張全載好才換，換完放掉舊的：貼圖一直只有一套，點再多次記憶體也不會疊上去
     function nextLook() {
@@ -152,12 +188,13 @@
       switching = true;
       const name = LOOK_NAMES[(LOOK_NAMES.indexOf(look) + 1) % LOOK_NAMES.length];
       return loadLook(name).then(set => {
-        Object.values(textures).forEach(t => t.dispose());
-        textures = set;
+        [...Object.values(textures), ...Object.values(fronts)].forEach(t => t.dispose());
+        ({ textures, fronts } = set);
         masks = {};
         look = name;
         applyZoom();
         material.map = textures[mood];
+        showFront();
         V.hud.savePref('look', name);
         aside(LOOKS[name].line);
         onChange();
@@ -193,6 +230,7 @@
       mood = next;
       if (textures[next]) {
         material.map = textures[next];
+        showFront();
         onChange();
       }
       placeBubble();
@@ -209,14 +247,16 @@
       const z = landscape ? LOOKS[look].zoom : 1;
       if (z === zoom) return;
       zoom = z;
-      const old = mesh.geometry;
+      const old = [mesh.geometry, front.geometry];
       mesh.geometry = standee(z);
-      old.dispose();
+      front.geometry = frontPlane(z);
+      old.forEach(g => g.dispose());
     }
     // main.js 每次排版時給：畫面是不是橫的
     function setLandscape(on) {
       landscape = on;
       applyZoom();
+      showFront();
     }
 
     function faceRect() {
@@ -312,7 +352,7 @@
     }
 
     return {
-      mesh, ready, setMood, say, hush, placeBubble, faceRect, nextLook, opaque, setLandscape,
+      mesh, front, ready, setMood, say, hush, placeBubble, faceRect, nextLook, opaque, setLandscape,
       get zoom() { return zoom; },
       get look() { return look; },
       get mood() { return mood; },

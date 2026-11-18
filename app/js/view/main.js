@@ -101,10 +101,11 @@
       scene.updateMatrixWorld();
       // 框景框牌桌加荷官，地板不算。直式螢幕是寬度先頂到，整張桌子框進來會太小，改成只框玩牌用得到的範圍、
       // 荷官只算立牌本身的四個角（它往後仰，外接盒會多出一大塊空的），桌子左右兩端超出畫面；
-      // 名牌與點數由 effects.js 的 keepInView 夾回畫面內
+      // 名牌與點數由 effects.js 的 keepInView 夾回畫面內。橫式的荷官也只算立牌本身：setFromObject 會連掛在底下、
+      // 下緣比立牌長的前景層一起算，框景就跟著變了
       const pts = aspect < 1
         ? [...corners(playBox()), ...dealerCorners()]
-        : corners(new THREE.Box3().setFromObject(T.group).union(new THREE.Box3().setFromObject(dealer.mesh)));
+        : corners(new THREE.Box3().setFromObject(T.group).union(new THREE.Box3().setFromPoints(dealerCorners())));
       const target = new THREE.Box3().setFromPoints(pts).getCenter(new THREE.Vector3());
       camera.position.copy(target).addScaledVector(dir, 12);
       camera.lookAt(target);
@@ -160,7 +161,8 @@
       const r = canvas.getBoundingClientRect();
       pointer.set((e.clientX - r.left) / r.width * 2 - 1, 1 - (e.clientY - r.top) / r.height * 2);
       ray.setFromCamera(pointer, camera);
-      const hit = ray.intersectObject(dealer.mesh)[0];
+      // 不往下找子物件：前景層掛在立牌底下，只算立牌本身
+      const hit = ray.intersectObject(dealer.mesh, false)[0];
       if (!hit || !dealer.opaque(hit.uv)) return false;
       const front = ray.intersectObject(T.group, true)[0];
       return !front || front.distance > hit.distance;

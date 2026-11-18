@@ -2,7 +2,7 @@
 // 縮成立牌的比例（560:520，左右補透明邊），寫成 app/js/view/dealer_art.js（不准手改）。
 // 換了原圖、改了這支的任何一行就重跑：node tools/make_dealer_art.js
 // 另外在 tools/_shots/art-<表情>-marks.png 留量測對照圖（不進版控）：橘框是找到的臉、青框是對白泡泡避開的頭、
-// 洋紅框是五官、黃框是大特寫的裁切
+// 洋紅框是五官、黃框是大特寫的裁切；發牌那張另留 art-deal-front-marks.png，洋紅線是前景層的多邊形（右邊放大、多邊形外壓暗）
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -28,6 +28,21 @@ const FEATURES = {
 // 大特寫裁一塊正方形（原圖像素），以五官為中心；五張用同一個大小，換表情時臉在圈裡一樣大。
 // 邊長取五官平均寬的 2.07 倍，臉在圈裡跟 v0.20.0 的西裝荷官一樣大（那時 480 對五官平均寬 232）
 const CROP = 344;
+// 前景層：桌機上發牌那張伸出來的手和牌被籌碼架擋掉（v0.23.0 第 4.4 條），把手臂、手、牌從本體挖出來另貼一層、畫在籌碼架前面。
+// 多邊形是原圖像素，2026-11-18 手量：上緣橫切前臂（第 590 列，桌機與橫式手機籌碼架只擋到約第 730 列以下，切線看不到），
+// 右緣沿手指外緣、拇指、牌的米白邊外 3 像素（牌外是黑旗袍），下緣切在牌底的黑描邊下（第 883 列起是旗袍）；左邊是透明背景。
+// 身體不挖：挖了整個上半身會蓋住籌碼架。對照圖 tools/_shots/art-deal-front-marks.png
+const FRONT = {
+  deal: [[236, 590], [392, 590], [412, 615], [419, 640], [421, 684], [446, 686], [448, 724], [466, 726], [471, 728], [472, 732],
+         [520, 870], [519, 877], [516, 883], [236, 883]],
+};
+// 前景層從本體解碼後的像素挖出來再壓一次。2026-11-18 量：無損 278 KB，0.95 只要 17 KB、跟本體平均差 2.6（255 級）；
+// 原圖的人本來就只有 250 上下的不透明度，無損也做不到逐像素一樣（平均差 0.8）。差到平均 5 以上就是挖錯位置或挖錯圖
+const FRONT_QUALITY = 0.95;
+const FRONT_MAX_MEAN_DIFF = 5;
+// 上緣（橫切前臂那一刀）往下羽化這麼多原圖像素：硬切的話，有損壓縮在透明與不透明的交界起漣漪，
+// 桌機上量到切線那一列差到 32 級（255 級），在沒被擋的前臂上是一條看得到的線
+const FRONT_FEATHER = 24;
 
 // 原圖與這支的內容一起算雜湊，寫進產出檔；tests/check_dealer.js 拿同一支比對，對不上就是改了沒重跑
 function sourceHash({ script = fs.readFileSync(__filename, 'utf8'), dir = SRC } = {}) {
@@ -97,6 +112,57 @@ const work = (dataUrl, cfg) => `(async () => {
   await back.decode();
   const decodeMs = Math.round(performance.now() - d0);
 
+  // 前景層：從解碼回來的本體挖（不是從原圖），疊上去跟本體同一份像素
+  let front = null;
+  if (CFG.front) {
+    const k = TH / N, off = (TW - TH) / 2;
+    const path = (ctx, f, fresh = true) => { if (fresh) ctx.beginPath(); CFG.front.forEach(([x, y], i) => ctx[i ? 'lineTo' : 'moveTo'](...f(x, y))); ctx.closePath(); };
+    const fc = document.createElement('canvas'); fc.width = TW; fc.height = TH;
+    const fx = fc.getContext('2d', { willReadFrequently: true });
+    path(fx, (x, y) => [x * k + off, y * k]);
+    fx.clip();
+    fx.drawImage(back, 0, 0);
+    const top = Math.min(...CFG.front.map(p => p[1])) * k, fade = fx.createLinearGradient(0, top, 0, top + CFG.feather * k);
+    fade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    fade.addColorStop(1, 'rgba(0, 0, 0, 1)');
+    fx.globalCompositeOperation = 'destination-in';
+    fx.fillStyle = fade;
+    fx.fillRect(0, 0, TW, TH);
+    const url = fc.toDataURL('image/webp', CFG.frontQuality);
+    // 自檢：解回來在多邊形裡完全不透明的像素，要跟本體一模一樣
+    const fb = new Image(); fb.src = url; await fb.decode();
+    const rd = src => { const c = document.createElement('canvas'); c.width = TW; c.height = TH; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(src, 0, 0); return x.getImageData(0, 0, TW, TH).data; };
+    const a = rd(fb), b = rd(back);
+    let solid = 0, same = 0, shown = 0, worst = 0, sum = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      if (a[i + 3]) shown++;
+      if (a[i + 3] >= 240 && b[i + 3] >= 240) {
+        solid++;
+        const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]), Math.abs(a[i + 3] - b[i + 3]));
+        if (d <= 2) same++;
+        worst = Math.max(worst, d); sum += d;
+      }
+    }
+    // 對照圖：左邊原圖縮一半畫多邊形，右邊多邊形那一塊放大 1.5 倍、多邊形外壓暗，看切線有沒有切到牌或手指
+    const [bx0, by0, bx1, by1] = [Math.min(...CFG.front.map(p => p[0])) - 24, Math.min(...CFG.front.map(p => p[1])) - 24,
+                                   Math.max(...CFG.front.map(p => p[0])) + 24, Math.max(...CFG.front.map(p => p[1])) + 24];
+    const z = 1.5, pw = Math.round((bx1 - bx0) * z), ph = Math.round((by1 - by0) * z);
+    const fm = document.createElement('canvas'); fm.width = N / 2 + pw; fm.height = Math.max(N / 2, ph);
+    const mc = fm.getContext('2d');
+    mc.fillStyle = '#212C31'; mc.fillRect(0, 0, fm.width, fm.height);
+    mc.drawImage(img, 0, 0, N / 2, N / 2);
+    mc.drawImage(img, bx0, by0, bx1 - bx0, by1 - by0, N / 2, 0, pw, ph);
+    mc.save();
+    mc.beginPath(); mc.rect(N / 2, 0, pw, ph);
+    path(mc, (x, y) => [N / 2 + (x - bx0) * z, (y - by0) * z], false);
+    mc.fillStyle = 'rgba(33, 44, 49, 0.7)'; mc.fill('evenodd');
+    mc.restore();
+    mc.lineWidth = 2; mc.strokeStyle = '#ff00ff';
+    path(mc, (x, y) => [x / 2, y / 2]); mc.stroke();
+    path(mc, (x, y) => [N / 2 + (x - bx0) * z, (y - by0) * z]); mc.stroke();
+    front = { url, solid, same, shown, worst, mean: +(sum / solid).toFixed(2), sheet: fm.toDataURL('image/png') };
+  }
+
   // 對照圖：原圖縮一半，底色用識別色深藍灰
   const head = [fx0, hairTop, fx1, Math.max(face.box[3], CFG.features[3])];
   const sheet = document.createElement('canvas'); sheet.width = N / 2; sheet.height = N / 2;
@@ -108,7 +174,7 @@ const work = (dataUrl, cfg) => `(async () => {
     sc.strokeStyle = color;
     sc.strokeRect(b[0] / 2, b[1] / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2);
   }
-  return { N, face, head, webp, measureMs, decodeMs, size: [back.naturalWidth, back.naturalHeight], sheet: sheet.toDataURL('image/png') };
+  return { N, face, head, webp, front, measureMs, decodeMs, size: [back.naturalWidth, back.naturalHeight], sheet: sheet.toDataURL('image/png') };
 })()`;
 
 const inside = (a, b, pad) => a[0] >= b[0] - pad && a[1] >= b[1] - pad && a[2] <= b[2] + pad && a[3] <= b[3] + pad;
@@ -123,8 +189,9 @@ async function main() {
       const f = FEATURES[m], cx = (f[0] + f[2]) / 2, cy = (f[1] + f[3]) / 2;
       const crop = [cx - CROP / 2, cy - CROP / 2, cx + CROP / 2, cy + CROP / 2].map(Math.round);
       const src = 'data:image/webp;base64,' + fs.readFileSync(path.join(SRC, `${m}.webp`)).toString('base64');
-      got[m] = { ...await page.evaluate(work(src, { tex: TEX, quality: QUALITY, features: f, crop }), 60000), crop };
+      got[m] = { ...await page.evaluate(work(src, { tex: TEX, quality: QUALITY, features: f, crop, front: FRONT[m], frontQuality: FRONT_QUALITY, feather: FRONT_FEATHER }), 60000), crop };
       fs.writeFileSync(path.join(OUT, `art-${m}-marks.png`), b64(got[m].sheet));
+      if (got[m].front) fs.writeFileSync(path.join(OUT, `art-${m}-front-marks.png`), b64(got[m].front.sheet));
     }
     return got;
   });
@@ -142,12 +209,18 @@ async function main() {
     marks[m] = { head: to(g.head), face: to(FEATURES[m]), crop: [c[0], c[1], +(c[2] - c[0]).toFixed(1)] };
     const kb = Math.round(b64(g.webp).length / 1024);
     console.log(`${m}：臉 ${g.face.box.join(',')}（佔五官框 ${g.face.cover}）、頭頂 ${g.head[1]}（原圖像素）；貼圖 ${g.size.join('×')}、WebP ${kb} KB；量測 ${g.measureMs} ms、解碼 ${g.decodeMs} ms`);
+    if (g.front) {
+      const { solid, same, shown, worst, mean } = g.front;
+      if (!solid || mean > FRONT_MAX_MEAN_DIFF) throw new Error(`${m}：前景層跟本體平均差 ${mean}（${solid} 個不透明像素），疊上去會看到切線，多邊形或座標換算有誤`);
+      console.log(`  前景層：WebP ${Math.round(b64(g.front.url).length / 1024)} KB（品質 ${FRONT_QUALITY}），看得到的 ${shown} 像素（佔貼圖 ${(shown / TEX[0] / TEX[1] * 100).toFixed(1)}%）；不透明的 ${solid} 像素跟本體差 2 以內的 ${same} 個，最大差 ${worst}、平均 ${mean}`);
+    }
   }
 
   const js = `// 由 tools/make_dealer_art.js 產生，不准手改：荷官五種表情的點陣插畫（WebP，${TEX.join('×')}，品質 ${QUALITY}）。
 // 原圖在 tests/fixtures/dealer_art/。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
 // source 是原圖與產生器的雜湊：換了原圖或改了產生器卻沒重跑，tests/check_dealer.js 會紅。
 // marks 是立牌座標（${VB.join('×')}）：head＝臉加頭髮 [左, 上, 右, 下]，對白泡泡避開它；face＝五官；crop＝大特寫 [左, 上, 邊長]
+// front 是前景層（同大小、其餘透明，品質 ${FRONT_QUALITY}）：發牌那張的手臂、手和牌，dealer.js 畫在籌碼架前面
 (function () {
   const V = window.BJK.view;
   V.dealerArt = {
@@ -159,14 +232,17 @@ ${MOODS.map(m => `      ${m}: ${JSON.stringify(marks[m])},`).join('\n')}
     images: {
 ${MOODS.map(m => `      ${m}: '${got[m].webp}',`).join('\n')}
     },
+    front: {
+${MOODS.filter(m => got[m].front).map(m => `      ${m}: '${got[m].front.url}',`).join('\n')}
+    },
   };
 })();
 `;
   fs.writeFileSync(TARGET, js);
-  const bin = MOODS.reduce((s, m) => s + b64(got[m].webp).length, 0);
+  const bin = MOODS.reduce((s, m) => s + b64(got[m].webp).length + (got[m].front ? b64(got[m].front.url).length : 0), 0);
   console.log(`✔ 寫入 ${path.relative(process.cwd(), TARGET)}：${Math.round(Buffer.byteLength(js) / 1024)} KB（WebP 本身 ${Math.round(bin / 1024)} KB）；` +
-    `五張解碼後 ${(TEX[0] * TEX[1] * 4 * MOODS.length / 1e6).toFixed(1)} MB；對照圖在 ${path.relative(process.cwd(), OUT)}\\art-<表情>-marks.png`);
+    `五張加前景層解碼後 ${(TEX[0] * TEX[1] * 4 * (MOODS.length + Object.keys(FRONT).length) / 1e6).toFixed(1)} MB；對照圖在 ${path.relative(process.cwd(), OUT)}\\art-<表情>-marks.png`);
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { MOODS, TEX, SRC, TARGET, sourceHash };
+module.exports = { MOODS, TEX, SRC, TARGET, FRONT, sourceHash };

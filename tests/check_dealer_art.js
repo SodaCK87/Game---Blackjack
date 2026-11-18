@@ -1,5 +1,5 @@
 // 守荷官插畫的產出檔（app/js/view/dealer_art.js，由 tools/make_dealer_art.js 產生）：跟原圖與產生器同步、五種表情都有圖、
-// 每張都是立牌的比例。純讀檔，CI 也跑。畫面上貼得對不對、臉框量在不在臉上，在 check_dealer.js 開瀏覽器量。
+// 每張都是立牌的比例，前景層（發牌那張的手和牌）跟本體一樣大。純讀檔，CI 也跑。畫面上貼得對不對、臉框量在不在臉上，在 check_dealer.js 開瀏覽器量。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -56,11 +56,13 @@ test('陽性對照：換一張原圖、改產生器的品質，都要判成過�
   }
 });
 
-test('五種表情都有圖，每張都是立牌的比例', () => {
+test('五種表情都有圖，每張都是立牌的比例；前景層只有產生器量了多邊形的表情才有，跟本體一樣大', () => {
   const art = loadArt();
   assert.deepStrictEqual(Object.keys(art.images), MOODS);
   assert.deepStrictEqual(Object.keys(art.marks), MOODS);
   assert.deepStrictEqual(ratioProblems(Object.fromEntries(MOODS.map(m => [m, decode(art.images[m])])), art.size), []);
+  assert.deepStrictEqual(Object.keys(art.front), Object.keys(ART_TOOL.FRONT));
+  assert.deepStrictEqual(ratioProblems(Object.fromEntries(Object.entries(art.front).map(([m, u]) => [`前景層 ${m}`, decode(u)])), art.size), []);
 });
 
 test('陽性對照：拿正方形的原圖量比例，要判成不是立牌的比例', () => {
