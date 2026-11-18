@@ -121,14 +121,16 @@ test('陽性對照：窄泡泡也照寬泡泡只在標點後換行，一段放�
 });
 
 // ---- 字型是非同步載入的 ----
-// 把字型拖慢 4 秒：開頁、先講一句（還是系統字）、等字型好了量一次，再叫 placeBubble 量一次；兩次要一樣，泡泡才是照新的字寬擺的
-const SLOW_FONT = `{ const load = FontFace.prototype.load; FontFace.prototype.load = function () { return new Promise(r => setTimeout(r, 4000)).then(() => load.call(this)); }; }`;
+// 把字型卡住：開頁、先講一句（還是系統字）、放行後等字型好了量一次，再叫 placeBubble 量一次；兩次要一樣，泡泡才是照新的字寬擺的。
+// 不用固定延遲：全套平行跑時開頁可能超過延遲，字型在量之前就到了（2026-11-18 全套紅過兩次）
+const SLOW_FONT = `{ const load = FontFace.prototype.load; let go; const gate = new Promise(r => { go = r; }); window.__releaseFont = () => go(); FontFace.prototype.load = function () { return gate.then(() => load.call(this)); }; }`;
 const FONT_SWAP = `(async () => {${snapJs}
   const F = BJK.view.bubbleFont, box = () => ({ bubble: rect(b), frame: rect(edge) });
   const added = () => [...document.fonts].some(f => f.family.replace(/"/g, '') === F.family && f.status === 'loaded');
   const early = added();
   d.say(${JSON.stringify(SWAP_LINE)});
   const fallback = box();
+  window.__releaseFont();
   const ok = await F.ready;
   const loaded = box();
   d.placeBubble();

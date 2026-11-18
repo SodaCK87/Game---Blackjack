@@ -234,7 +234,7 @@ test('陽性對照：重傳前不 dispose（原地重傳），要判成縮小看
 }));
 
 test('陽性對照：荷官與插畫都好了不重畫那一格，要判成畫面上還是純色版', () => withCopy(path.join('js', 'view', 'dealer.js'),
-  'material.needsUpdate = true;\n        onChange();', 'material.needsUpdate = true;', async tmp => {
+  'material.needsUpdate = true;\n        showFront();\n        onChange();', 'material.needsUpdate = true;\n        showFront();', async tmp => {
     const m = await probe(tmp);
     assert.throws(() => assertUploaded(m), /補畫之後沒有重畫/);
   }));
