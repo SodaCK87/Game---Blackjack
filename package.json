@@ -3,7 +3,7 @@
   "private": true,
   "description": "網頁 21 點。版號唯一來源是 app/js/core/version.js 的 BJK_VER，這裡刻意不寫 version",
   "scripts": {
-    "test": "node --test --test-concurrency=4 \"tests/check_*.js\"",
+    "test": "node --test --test-concurrency=2 \"tests/check_*.js\"",
     "mutants": "node tests/mutants.js",
     "build:three": "node tools/build_three.js"
   },
