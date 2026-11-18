@@ -109,7 +109,7 @@ test('陽性對照：拿掉「右邊放不下就放頭頂」，直式手機的�
   }
 });
 
-// 插畫每種表情的頭擺在不同地方（驚訝偏右、遺憾偏低）：五種表情各講一次長句、一次短句；再在遺憾時講、講到一半換成發牌
+// 插畫每種表情的頭框各自量（v0.20.0 的西裝荷官驚訝偏右、遺憾偏低）：五種表情各講一次長句、一次短句；再在遺憾時講、講到一半換成發牌
 const EACH_MOOD = `(async () => {
   const d = BJK.view.stage.dealer;
   await d.ready;
@@ -161,12 +161,21 @@ test('陽性對照：直式畫面不收拉頁、按鈕與版本號留在上方�
   }
 });
 
+// 旗袍荷官（v0.23.0）五種表情的頭只差幾個像素，不重擺也蓋不到。複本裡把發牌的頭框搬到遺憾那顆頭的右邊一個頭寬（遺憾時泡泡擺的地方），
+// 當成換表情頭會移動的插畫；同一份搬過的複本照常重擺時不准蓋到，紅才是因為沒重擺
 test('陽性對照：換表情時泡泡不重擺，桌機上要判成遺憾換成發牌時蓋到臉', async () => {
-  const tmp = brokenCopy([[DEALER_JS, '        onChange();\n      }\n      placeBubble();\n', '        onChange();\n      }\n']]);
+  const art = loadArt(), deal = art.marks.deal, [x0, y0, x1, y1] = art.marks.sorry.head;
+  const line = marks => `      deal: ${JSON.stringify(marks)},`;
+  const moved = [ART_JS, line(deal), line({ ...deal, head: [x1, y0, +(2 * x1 - x0).toFixed(1), y1] })];
+  const ok = brokenCopy([moved]);
+  const tmp = brokenCopy([moved, [DEALER_JS, '        onChange();\n      }\n      placeBubble();\n', '        onChange();\n      }\n']]);
   try {
+    const good = (await eachMood(ok, DESKTOP)).value['遺憾講到一半換成發牌'];
+    assert.ok(!overlaps(good.bubble, good.face), `照常重擺也蓋到，搬頭框的量法有誤：${JSON.stringify(good)}`);
     const m = (await eachMood(tmp, DESKTOP)).value['遺憾講到一半換成發牌'];
     assert.ok(overlaps(m.bubble, m.face), JSON.stringify(m));
   } finally {
+    fs.rmSync(ok, { recursive: true, force: true });
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
@@ -226,12 +235,16 @@ test('陽性對照：五種表情都貼待機那張，要判成貼錯圖', async
   }
 });
 
-test('陽性對照：待機的臉框換成遺憾那張的，要判成框不在臉上', async () => {
-  const art = loadArt(), line = m => `      ${m}: ${JSON.stringify(art.marks[m])},`;
-  const tmp = brokenCopy([[ART_JS, line('idle'), line('idle').replace(JSON.stringify(art.marks.idle), JSON.stringify(art.marks.sorry))]]);
+// 旗袍荷官（v0.23.0）五種表情的頭擺在差不多的位置，換成別張的框量不出錯；改把框搬到頭框頂端的頭髮上：
+// 框還在頭裡、也不透明，只剩膚色量得出不對
+test('陽性對照：待機的五官框搬到頭頂的頭髮上，要判成框不在臉上', async () => {
+  const idle = loadArt().marks.idle, [x0, y0, x1, y1] = idle.face, top = idle.head[1];
+  const line = marks => `      idle: ${JSON.stringify(marks)},`;
+  const tmp = brokenCopy([[ART_JS, line(idle), line({ ...idle, face: [x0, top, x1, +(top + y1 - y0).toFixed(1)] })]]);
   try {
-    const problems = faceMarkProblems((await artTex(tmp)).value.face);
-    assert.ok(problems.some(p => p.startsWith('idle：')), problems.join('｜'));
+    const face = (await artTex(tmp)).value.face;
+    assert.ok(faceMarkProblems(face).some(p => p.startsWith('idle：')), JSON.stringify(face.idle));
+    assert.ok(face.idle.inHead && face.idle.skin < 0.3, `要紅在膚色不夠，不是框跑出頭外：${JSON.stringify(face.idle)}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

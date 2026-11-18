@@ -65,7 +65,7 @@ test('五種表情都有圖，每張都是立牌的比例', () => {
 
 test('陽性對照：拿正方形的原圖量比例，要判成不是立牌的比例', () => {
   const src = Object.fromEntries(MOODS.map(m => [m, fs.readFileSync(path.join(ART_TOOL.SRC, `${m}.webp`))]));
-  // 先確認量法：原圖讀得出 1254×1254，紅是因為比例、不是檔頭讀錯
-  assert.deepStrictEqual(webpSize(src.idle), [1254, 1254]);
+  // 先確認量法：原圖讀得出 1024×1024，紅是因為比例、不是檔頭讀錯
+  assert.deepStrictEqual(webpSize(src.idle), [1024, 1024]);
   assert.strictEqual(ratioProblems(src).length, 5);
 });
