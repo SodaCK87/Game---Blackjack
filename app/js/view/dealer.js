@@ -8,29 +8,39 @@
   const H = 3.4, W = H * VB_W / VB_H;    // 立牌在場景裡的大小
   const ASIDE_MS = 1600;                 // 換造型那句話講多久
 
-  // 造型：點荷官時依序循環。立牌大小都一樣，換造型只換貼圖。
+  // 造型：點荷官時依序循環（西裝 → 旗袍 → 舊版 → 西裝），第一款是預設。立牌大小都一樣，換造型只換貼圖。
   // src：表情的貼圖網址；head：臉加頭髮的外框（立牌座標 [左, 上, 右, 下]），對白泡泡避開它；portrait：大特寫；line：換上時講的話
   if (!V.dealerClassic) throw new Error('載入順序錯：dealer_classic.js 要排在 dealer.js 之前');
   if (!V.dealerArt) throw new Error('載入順序錯：dealer_art.js 要排在 dealer.js 之前');
   if (!V.bubbleFont) throw new Error('載入順序錯：lib/bubble_font.js 要排在 dealer.js 之前');
   const ART = V.dealerArt, CLASSIC = V.dealerClassic;
   const classicSvg = (mood, size = `width="${VB_W * 2}" height="${VB_H * 2}" viewBox="${CLASSIC.viewBox}"`) => CLASSIC.draw(mood, size);
+  // 點陣插畫（tools/make_dealer_art.js 產生，一套一份）：每種表情的頭擺的位置都不同，外框與裁切逐張量
+  const painted = set => ({
+    src: mood => set.images[mood],
+    // 前景層：只有量了多邊形的表情有（旗袍那套發牌時伸到籌碼架上的手和牌），其他表情、其他套不畫
+    front: mood => set.front[mood],
+    head: mood => set.marks[mood].head,
+    // rect.face 是五官的位置，看不到；探針量大特寫的大字有沒有壓到它
+    portrait: mood => {
+      const { crop: [x, y, s], face: [x0, y0, x1, y1] } = set.marks[mood];
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="${x} ${y} ${s} ${s}">` +
+        `<image href="${set.images[mood]}" width="${VB_W}" height="${VB_H}"/>` +
+        `<rect class="face" x="${x0}" y="${y0}" width="${+(x1 - x0).toFixed(1)}" height="${+(y1 - y0).toFixed(1)}" fill="none"/></svg>`;
+    },
+  });
   const LOOKS = {
-    // 點陣插畫（tools/make_dealer_art.js 產生）：每種表情的頭擺的位置都不同，外框與裁切逐張量
+    // 西裝男荷官（v0.20.0）。id 沿用 art：v0.23～v0.26 這個 id 指的是旗袍，存著它的玩家改看到西裝，就是使用者要的預設（2026-11-18）
     art: {
-      src: mood => ART.images[mood],
-      // 前景層：只有發牌那張有（伸到籌碼架上的手和牌），其他表情不畫
-      front: mood => ART.front[mood],
-      head: mood => ART.marks[mood].head,
-      // rect.face 是五官的位置，看不到；探針量大特寫的大字有沒有壓到它
-      portrait: mood => {
-        const { crop: [x, y, s], face: [x0, y0, x1, y1] } = ART.marks[mood];
-        return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="${x} ${y} ${s} ${s}">` +
-          `<image href="${ART.images[mood]}" width="${VB_W}" height="${VB_H}"/>` +
-          `<rect class="face" x="${x0}" y="${y0}" width="${+(x1 - x0).toFixed(1)}" height="${+(y1 - y0).toFixed(1)}" fill="none"/></svg>`;
-      },
+      ...painted(ART.sets.suit),
       line: '這身才夠氣勢。',
       // 橫式畫面放大幾倍、裁掉下半身：到腰的半身像整張塞進立牌，桌機上臉太小（使用者 2026-11-16 要 1.2 倍）
+      zoom: 1.2,
+    },
+    // 旗袍女荷官（v0.23.0）
+    qipao: {
+      ...painted(ART.sets.qipao),
+      line: '換上旗袍，替你招好運。',
       zoom: 1.2,
     },
     // 舊版：SVG 畫的，臉框是橢圓，往上多留 20 給頭髮
@@ -141,7 +151,7 @@
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false });
     const mesh = new THREE.Mesh(standee(zoom), material);
     mesh.renderOrder = 1;
-    // 前景層：疊在立牌上的第二片（掛在立牌底下，跟著縮放與仰角；平面見 frontPlane），只貼發牌那張的手和牌。不比深度、排在最後畫，
+    // 前景層：疊在立牌上的第二片（掛在立牌底下，跟著縮放與仰角；平面見 frontPlane），只貼旗袍那套發牌那張的手和牌。不比深度、排在最後畫，
     // 才蓋得過前面的籌碼架；其他表情整片不畫，不多一個 draw call。直式畫面俯角大，手和牌本來就在籌碼架上方，也不畫：
     // 疊上去看不出差別，卻要多塗一整片立牌那麼大的面積
     const frontMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, depthTest: false });
@@ -190,6 +200,8 @@
       return loadLook(name).then(set => {
         [...Object.values(textures), ...Object.values(fronts)].forEach(t => t.dispose());
         ({ textures, fronts } = set);
+        // 前景層收起來時 map 還指著舊那套的貼圖：不放掉的話，換到沒有前景層的造型，舊圖一直被它留著
+        frontMaterial.map = null;
         masks = {};
         look = name;
         applyZoom();

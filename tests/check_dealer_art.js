@@ -1,5 +1,6 @@
-// 守荷官插畫的產出檔（app/js/view/dealer_art.js，由 tools/make_dealer_art.js 產生）：跟原圖與產生器同步、五種表情都有圖、
-// 每張都是立牌的比例，前景層（發牌那張的手和牌）跟本體一樣大。純讀檔，CI 也跑。畫面上貼得對不對、臉框量在不在臉上，在 check_dealer.js 開瀏覽器量。
+// 守荷官插畫的產出檔（app/js/view/dealer_art.js，由 tools/make_dealer_art.js 產生）：兩套（西裝、旗袍）都在、跟兩套原圖與產生器同步、
+// 每套五種表情都有圖、每張都是立牌的比例，前景層只有量了多邊形的表情才有、跟本體一樣大。純讀檔，CI 也跑。
+// 畫面上貼得對不對、臉框量在不在臉上，在 check_dealer.js 開瀏覽器量。
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -10,6 +11,8 @@ const ART_TOOL = require('../tools/make_dealer_art');
 
 const APP = path.join(__dirname, '..', 'app');
 const MOODS = ['idle', 'deal', 'surprised', 'smile', 'sorry'];
+// 兩套原圖的邊長：量法自檢用，讀錯檔頭的話會跟這裡對不上
+const ORIGINAL = { suit: 1254, qipao: 1024 };
 
 function loadArt() {
   const window = { BJK: { view: {} } };
@@ -38,36 +41,47 @@ function ratioProblems(images, size) {
 }
 const decode = url => Buffer.from(url.split(',')[1], 'base64');
 
-test('dealer_art.js 跟原圖與產生器同步', () => {
-  assert.strictEqual(loadArt().source, ART_TOOL.sourceHash(), '換了 tests/fixtures/dealer_art/ 的原圖或改了 tools/make_dealer_art.js，就重跑 node tools/make_dealer_art.js');
+test('dealer_art.js 跟兩套原圖與產生器同步', () => {
+  assert.strictEqual(loadArt().source, ART_TOOL.sourceHash(), '換了 tests/fixtures/dealer_art*/ 的原圖或改了 tools/make_dealer_art.js，就重跑 node tools/make_dealer_art.js');
 });
 
-test('陽性對照：換一張原圖、改產生器的品質，都要判成過期', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-art-'));
-  try {
-    fs.cpSync(ART_TOOL.SRC, tmp, { recursive: true });
-    fs.copyFileSync(path.join(ART_TOOL.SRC, 'idle.webp'), path.join(tmp, 'smile.webp'));
-    assert.notStrictEqual(ART_TOOL.sourceHash({ dir: tmp }), loadArt().source);
-    const script = fs.readFileSync(require.resolve('../tools/make_dealer_art'), 'utf8');
-    assert.ok(script.includes('const QUALITY = '), '破壞沒有命中');
-    assert.notStrictEqual(ART_TOOL.sourceHash({ script: script.replace('const QUALITY = ', 'const QUALITY = 0.5 || ') }), loadArt().source);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+test('陽性對照：任一套換一張原圖、改產生器的品質，都要判成過期', () => {
+  for (const s of ART_TOOL.SET_NAMES) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bjk-art-'));
+    try {
+      fs.cpSync(ART_TOOL.srcOf(s), tmp, { recursive: true });
+      assert.strictEqual(ART_TOOL.sourceHash({ dirs: { [s]: tmp } }), loadArt().source, `量法有誤：${s} 原樣複製也算成過期`);
+      fs.copyFileSync(path.join(ART_TOOL.srcOf(s), 'idle.webp'), path.join(tmp, 'smile.webp'));
+      assert.notStrictEqual(ART_TOOL.sourceHash({ dirs: { [s]: tmp } }), loadArt().source, `${s} 換了一張原圖沒判成過期`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   }
+  const script = fs.readFileSync(require.resolve('../tools/make_dealer_art'), 'utf8');
+  assert.ok(script.includes('const QUALITY = '), '破壞沒有命中');
+  assert.notStrictEqual(ART_TOOL.sourceHash({ script: script.replace('const QUALITY = ', 'const QUALITY = 0.5 || ') }), loadArt().source);
 });
 
-test('五種表情都有圖，每張都是立牌的比例；前景層只有產生器量了多邊形的表情才有，跟本體一樣大', () => {
+test('兩套都有五種表情，每張都是立牌的比例；前景層只有產生器量了多邊形的表情才有（西裝那套沒有），跟本體一樣大', () => {
   const art = loadArt();
-  assert.deepStrictEqual(Object.keys(art.images), MOODS);
-  assert.deepStrictEqual(Object.keys(art.marks), MOODS);
-  assert.deepStrictEqual(ratioProblems(Object.fromEntries(MOODS.map(m => [m, decode(art.images[m])])), art.size), []);
-  assert.deepStrictEqual(Object.keys(art.front), Object.keys(ART_TOOL.FRONT));
-  assert.deepStrictEqual(ratioProblems(Object.fromEntries(Object.entries(art.front).map(([m, u]) => [`前景層 ${m}`, decode(u)])), art.size), []);
+  assert.deepStrictEqual(Object.keys(art.sets), ['suit', 'qipao']);
+  for (const [s, set] of Object.entries(art.sets)) {
+    assert.deepStrictEqual(Object.keys(set.images), MOODS, s);
+    assert.deepStrictEqual(Object.keys(set.marks), MOODS, s);
+    assert.deepStrictEqual(ratioProblems(Object.fromEntries(MOODS.map(m => [`${s}／${m}`, decode(set.images[m])])), art.size), []);
+    assert.deepStrictEqual(Object.keys(set.front), Object.keys(ART_TOOL.SETS[s].front), s);
+    assert.deepStrictEqual(ratioProblems(Object.fromEntries(Object.entries(set.front).map(([m, u]) => [`${s}／前景層 ${m}`, decode(u)])), art.size), []);
+  }
+  assert.deepStrictEqual(Object.keys(art.sets.suit.front), [], '前景層只屬於旗袍那套');
+  // 兩套不准是同一份圖：資料夾指錯時兩套會一模一樣
+  assert.deepStrictEqual(MOODS.filter(m => art.sets.suit.images[m] === art.sets.qipao.images[m]), []);
 });
 
 test('陽性對照：拿正方形的原圖量比例，要判成不是立牌的比例', () => {
-  const src = Object.fromEntries(MOODS.map(m => [m, fs.readFileSync(path.join(ART_TOOL.SRC, `${m}.webp`))]));
-  // 先確認量法：原圖讀得出 1024×1024，紅是因為比例、不是檔頭讀錯
-  assert.deepStrictEqual(webpSize(src.idle), [1024, 1024]);
-  assert.strictEqual(ratioProblems(src).length, 5);
+  for (const s of ART_TOOL.SET_NAMES) {
+    const src = Object.fromEntries(MOODS.map(m => [m, fs.readFileSync(path.join(ART_TOOL.srcOf(s), `${m}.webp`))]));
+    // 先確認量法：原圖讀得出原本的邊長，紅是因為比例、不是檔頭讀錯
+    assert.deepStrictEqual(webpSize(src.idle), [ORIGINAL[s], ORIGINAL[s]], s);
+    assert.strictEqual(ratioProblems(src).length, 5, s);
+  }
 });

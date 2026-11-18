@@ -1,41 +1,69 @@
-// 把荷官的點陣插畫（tests/fixtures/dealer_art/<表情>.webp，1024×1024、背景透明、腰到臀部之間被底邊截掉）
-// 縮成立牌的比例（560:520，左右補透明邊），寫成 app/js/view/dealer_art.js（不准手改）。
-// 換了原圖、改了這支的任何一行就重跑：node tools/make_dealer_art.js
-// 另外在 tools/_shots/art-<表情>-marks.png 留量測對照圖（不進版控）：橘框是找到的臉、青框是對白泡泡避開的頭、
-// 洋紅框是五官、黃框是大特寫的裁切；發牌那張另留 art-deal-front-marks.png，洋紅線是前景層的多邊形（右邊放大、多邊形外壓暗）
+// 把兩套荷官的點陣插畫（tests/fixtures/<套的資料夾>/<表情>.webp，正方形、背景透明、下半身被底邊截掉）
+// 縮成立牌的比例（560:520，左右補透明邊），兩套一起寫進 app/js/view/dealer_art.js（不准手改）。
+// 換了任何一套的原圖、改了這支的任何一行就重跑：node tools/make_dealer_art.js
+// 另外在 tools/_shots/art-<套>-<表情>-marks.png 留量測對照圖（不進版控）：橘框是找到的臉、青框是對白泡泡避開的頭、
+// 洋紅框是五官、黃框是大特寫的裁切；有前景層的那張另留 art-<套>-<表情>-front-marks.png，洋紅線是前景層的多邊形（右邊放大、多邊形外壓暗）
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const SRC = path.join(__dirname, '..', 'tests', 'fixtures', 'dealer_art');
+const FIXTURES = path.join(__dirname, '..', 'tests', 'fixtures');
 const TARGET = path.join(__dirname, '..', 'app', 'js', 'view', 'dealer_art.js');
 const OUT = path.join(__dirname, '_shots');
 const MOODS = ['idle', 'deal', 'surprised', 'smile', 'sorry'];
 const VB = [560, 520];          // 立牌座標，跟 dealer.js 的 VB_W、VB_H 一樣
 // 貼圖像素：直式手機上立牌約 690×640 個裝置像素（390 寬、畫布密度上限 2），840×780 夠用還留一點給大特寫。
-// 舊版 JOJO 烘焙圖是 1120×1040，五張解碼後約 23 MB；這個尺寸約 13 MB
+// 舊版 JOJO 烘焙圖是 1120×1040，五張解碼後約 23 MB；這個尺寸約 13 MB。兩套同一個大小：解析度照畫面推，跟原圖大小無關
 const TEX = [840, 780];
 const QUALITY = 0.85;
-// 五官在原圖的位置（原圖像素 [左, 上, 右, 下]：眉毛上緣到下唇、兩眼外側），2026-11-18 照 10 像素格線逐張量，
-// 對照圖上洋紅框要框住眉眼嘴。大特寫的大字不准壓到這一塊（tests/check_ui_text.js 的 BJK-04）
-const FEATURES = {
-  idle: [430, 188, 602, 320],
-  deal: [430, 193, 602, 324],
-  surprised: [438, 173, 600, 334],
-  smile: [418, 184, 575, 327],
-  sorry: [435, 217, 600, 345],
+
+// 每套的手量數值。features：五官在原圖的位置（原圖像素 [左, 上, 右, 下]：眉毛上緣到下唇、兩眼外側），對照圖上洋紅框要框住眉眼嘴，
+// 大特寫的大字不准壓到這一塊（tests/check_ui_text.js 的 BJK-04）。crop：大特寫裁的正方形邊長（原圖像素），以五官為中心、五張一樣大。
+// pick：臉取哪一塊皮膚色連通區域。front：前景層的多邊形（原圖像素），只有量了的表情才有
+const SETS = {
+  // 西裝男荷官（v0.20.0，1254×1254、腰部以下被底邊截掉）：數值照 945ceea^ 的版本原樣搬回來
+  suit: {
+    dir: 'dealer_art',
+    // 2026-11-16 照 50 像素格線逐張量；這套每種表情的頭擺的位置都不同（驚訝偏右、遺憾偏低）
+    features: {
+      idle: [640, 170, 830, 390],
+      deal: [700, 320, 945, 520],
+      surprised: [685, 285, 935, 525],
+      smile: [555, 195, 790, 395],
+      sorry: [460, 415, 700, 640],
+    },
+    crop: 480,
+    // 整張最大的一塊：沒露肩、沒露手臂，脖子、手被陰影線切開，手套是白的不算
+    pick: 'largest',
+    front: {},
+  },
+  // 旗袍女荷官（v0.23.0，1024×1024、腰到臀部之間被底邊截掉）
+  qipao: {
+    dir: 'dealer_art_qipao',
+    // 2026-11-18 照 10 像素格線逐張量
+    features: {
+      idle: [430, 188, 602, 320],
+      deal: [430, 193, 602, 324],
+      surprised: [438, 173, 600, 334],
+      smile: [418, 184, 575, 327],
+      sorry: [435, 217, 600, 345],
+    },
+    // 五官平均寬（166）的 2.07 倍，臉在圈裡跟西裝那套一樣大（480 對五官平均寬 232）
+    crop: 344,
+    // 五官框裡佔最多的那一塊：露肩、露手臂，整張最大的一塊是手臂。舉到臉旁的手被輪廓線隔開，連不進來
+    pick: 'features',
+    // 桌機上發牌那張伸出來的手和牌被籌碼架擋掉（v0.23.0 第 4.4 條），把手臂、手、牌從本體挖出來另貼一層、畫在籌碼架前面。
+    // 2026-11-18 手量：上緣橫切前臂（第 590 列，桌機與橫式手機籌碼架只擋到約第 730 列以下，切線看不到），
+    // 右緣沿手指外緣、拇指、牌的米白邊外 3 像素（牌外是黑旗袍），下緣切在牌底的黑描邊下（第 883 列起是旗袍）；左邊是透明背景。
+    // 身體不挖：挖了整個上半身會蓋住籌碼架。西裝那套沒做：使用者只要旗袍有（2026-11-18）
+    front: {
+      deal: [[236, 590], [392, 590], [412, 615], [419, 640], [421, 684], [446, 686], [448, 724], [466, 726], [471, 728], [472, 732],
+             [520, 870], [519, 877], [516, 883], [236, 883]],
+    },
+  },
 };
-// 大特寫裁一塊正方形（原圖像素），以五官為中心；五張用同一個大小，換表情時臉在圈裡一樣大。
-// 邊長取五官平均寬的 2.07 倍，臉在圈裡跟 v0.20.0 的西裝荷官一樣大（那時 480 對五官平均寬 232）
-const CROP = 344;
-// 前景層：桌機上發牌那張伸出來的手和牌被籌碼架擋掉（v0.23.0 第 4.4 條），把手臂、手、牌從本體挖出來另貼一層、畫在籌碼架前面。
-// 多邊形是原圖像素，2026-11-18 手量：上緣橫切前臂（第 590 列，桌機與橫式手機籌碼架只擋到約第 730 列以下，切線看不到），
-// 右緣沿手指外緣、拇指、牌的米白邊外 3 像素（牌外是黑旗袍），下緣切在牌底的黑描邊下（第 883 列起是旗袍）；左邊是透明背景。
-// 身體不挖：挖了整個上半身會蓋住籌碼架。對照圖 tools/_shots/art-deal-front-marks.png
-const FRONT = {
-  deal: [[236, 590], [392, 590], [412, 615], [419, 640], [421, 684], [446, 686], [448, 724], [466, 726], [471, 728], [472, 732],
-         [520, 870], [519, 877], [516, 883], [236, 883]],
-};
+const SET_NAMES = Object.keys(SETS);
+const srcOf = name => path.join(FIXTURES, SETS[name].dir);
 // 前景層從本體解碼後的像素挖出來再壓一次。2026-11-18 量：無損 278 KB，0.95 只要 17 KB、跟本體平均差 2.6（255 級）；
 // 原圖的人本來就只有 250 上下的不透明度，無損也做不到逐像素一樣（平均差 0.8）。差到平均 5 以上就是挖錯位置或挖錯圖
 const FRONT_QUALITY = 0.95;
@@ -44,10 +72,11 @@ const FRONT_MAX_MEAN_DIFF = 5;
 // 桌機上量到切線那一列差到 32 級（255 級），在沒被擋的前臂上是一條看得到的線
 const FRONT_FEATHER = 24;
 
-// 原圖與這支的內容一起算雜湊，寫進產出檔；tests/check_dealer.js 拿同一支比對，對不上就是改了沒重跑
-function sourceHash({ script = fs.readFileSync(__filename, 'utf8'), dir = SRC } = {}) {
+// 兩套原圖與這支的內容一起算雜湊，寫進產出檔；tests/check_dealer_art.js 拿同一支比對，對不上就是改了沒重跑。
+// dirs：{ 套: 資料夾 }，測試拿暫存複本換掉某一套
+function sourceHash({ script = fs.readFileSync(__filename, 'utf8'), dirs = {} } = {}) {
   const h = crypto.createHash('sha256').update(script.replace(/\r\n/g, '\n'));
-  for (const m of MOODS) h.update(m).update(fs.readFileSync(path.join(dir, `${m}.webp`)));
+  for (const s of SET_NAMES) for (const m of MOODS) h.update(`${s}/${m}`).update(fs.readFileSync(path.join(dirs[s] || srcOf(s), `${m}.webp`)));
   return h.digest('hex').slice(0, 16);
 }
 
@@ -64,8 +93,7 @@ const work = (dataUrl, cfg) => `(async () => {
   fctx.drawImage(img, 0, 0);
   const p = fctx.getImageData(0, 0, N, N).data;
 
-  // 臉：亮、偏橘的皮膚色，隔一格取樣，取五官框裡佔最多的那一塊連通區域。不取整張最大的一塊：
-  // 露肩、露手臂的造型（2026-11-18 旗袍荷官）最大塊是手臂。舉到臉旁的手被輪廓線隔開，連不進來
+  // 臉：亮、偏橘的皮膚色，隔一格取樣的連通區域；取哪一塊照套給的 pick（largest＝整張最大，features＝五官框裡佔最多）
   const [ex0, ey0, ex1, ey1] = CFG.features;
   const h = N >> 1, skin = new Uint8Array(h * h), seen = new Uint8Array(h * h), stack = new Int32Array(h * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < h; x++) {
@@ -86,7 +114,8 @@ const work = (dataUrl, cfg) => `(async () => {
         if (j >= 0 && j < h * h && skin[j] && !seen[j]) { seen[j] = 1; stack[top++] = j; }
       }
     }
-    if (!face || inF > face.inF) face = { area: area * 4, inF, box: [x0 * 2, y0 * 2, x1 * 2 + 1, y1 * 2 + 1] };
+    const better = !face || (CFG.pick === 'largest' ? area * 4 > face.area : inF > face.inF);
+    if (better) face = { area: area * 4, inF, box: [x0 * 2, y0 * 2, x1 * 2 + 1, y1 * 2 + 1] };
   }
   face.cover = +(face.inF * 4 / ((ex1 - ex0) * (ey1 - ey0))).toFixed(3);
   // 頭：臉加五官的外框（側臉時遠側的眼睛被頭髮圍住，皮膚色量不到），頂端拉到頭髮的頂：
@@ -185,13 +214,18 @@ async function main() {
   const b64 = d => Buffer.from(d.split(',')[1], 'base64');
   const r = await withPage(availableBrowsers()[0], { size: [1280, 720], mobile: false }, async page => {
     const got = {};
-    for (const m of MOODS) {
-      const f = FEATURES[m], cx = (f[0] + f[2]) / 2, cy = (f[1] + f[3]) / 2;
-      const crop = [cx - CROP / 2, cy - CROP / 2, cx + CROP / 2, cy + CROP / 2].map(Math.round);
-      const src = 'data:image/webp;base64,' + fs.readFileSync(path.join(SRC, `${m}.webp`)).toString('base64');
-      got[m] = { ...await page.evaluate(work(src, { tex: TEX, quality: QUALITY, features: f, crop, front: FRONT[m], frontQuality: FRONT_QUALITY, feather: FRONT_FEATHER }), 60000), crop };
-      fs.writeFileSync(path.join(OUT, `art-${m}-marks.png`), b64(got[m].sheet));
-      if (got[m].front) fs.writeFileSync(path.join(OUT, `art-${m}-front-marks.png`), b64(got[m].front.sheet));
+    for (const s of SET_NAMES) {
+      const set = SETS[s];
+      got[s] = {};
+      for (const m of MOODS) {
+        const f = set.features[m], cx = (f[0] + f[2]) / 2, cy = (f[1] + f[3]) / 2;
+        const crop = [cx - set.crop / 2, cy - set.crop / 2, cx + set.crop / 2, cy + set.crop / 2].map(Math.round);
+        const src = 'data:image/webp;base64,' + fs.readFileSync(path.join(srcOf(s), `${m}.webp`)).toString('base64');
+        const cfg = { tex: TEX, quality: QUALITY, features: f, crop, pick: set.pick, front: set.front[m], frontQuality: FRONT_QUALITY, feather: FRONT_FEATHER };
+        const g = got[s][m] = { ...await page.evaluate(work(src, cfg), 60000), crop };
+        fs.writeFileSync(path.join(OUT, `art-${s}-${m}-marks.png`), b64(g.sheet));
+        if (g.front) fs.writeFileSync(path.join(OUT, `art-${s}-${m}-front-marks.png`), b64(g.front.sheet));
+      }
     }
     return got;
   });
@@ -200,49 +234,62 @@ async function main() {
 
   // 原圖像素 → 立牌座標：正方形縮到立牌的高，左右各補 (寬 − 高) / 2
   const marks = {};
-  for (const m of MOODS) {
-    const g = got[m], k = VB[1] / g.N, off = (VB[0] - VB[1]) / 2;
-    const to = ([x0, y0, x1, y1]) => [x0 * k + off, y0 * k, x1 * k + off, y1 * k].map(v => +v.toFixed(1));
-    if (!inside(FEATURES[m], g.face.box, 60)) throw new Error(`${m}：五官 ${FEATURES[m]} 不在找到的臉 ${g.face.box} 裡，原圖換過就重量 FEATURES`);
-    if (g.face.cover < 0.4) throw new Error(`${m}：找到的臉只佔五官框的 ${g.face.cover}，皮膚色的門檻可能不適用這張圖，或 FEATURES 沒框在臉上`);
-    const c = to(g.crop);
-    marks[m] = { head: to(g.head), face: to(FEATURES[m]), crop: [c[0], c[1], +(c[2] - c[0]).toFixed(1)] };
-    const kb = Math.round(b64(g.webp).length / 1024);
-    console.log(`${m}：臉 ${g.face.box.join(',')}（佔五官框 ${g.face.cover}）、頭頂 ${g.head[1]}（原圖像素）；貼圖 ${g.size.join('×')}、WebP ${kb} KB；量測 ${g.measureMs} ms、解碼 ${g.decodeMs} ms`);
-    if (g.front) {
-      const { solid, same, shown, worst, mean } = g.front;
-      if (!solid || mean > FRONT_MAX_MEAN_DIFF) throw new Error(`${m}：前景層跟本體平均差 ${mean}（${solid} 個不透明像素），疊上去會看到切線，多邊形或座標換算有誤`);
-      console.log(`  前景層：WebP ${Math.round(b64(g.front.url).length / 1024)} KB（品質 ${FRONT_QUALITY}），看得到的 ${shown} 像素（佔貼圖 ${(shown / TEX[0] / TEX[1] * 100).toFixed(1)}%）；不透明的 ${solid} 像素跟本體差 2 以內的 ${same} 個，最大差 ${worst}、平均 ${mean}`);
+  for (const s of SET_NAMES) {
+    const set = SETS[s];
+    marks[s] = {};
+    for (const m of MOODS) {
+      const g = got[s][m], k = VB[1] / g.N, off = (VB[0] - VB[1]) / 2, f = set.features[m], tag = `${s}／${m}`;
+      const to = ([x0, y0, x1, y1]) => [x0 * k + off, y0 * k, x1 * k + off, y1 * k].map(v => +v.toFixed(1));
+      if (!inside(f, g.face.box, 60)) throw new Error(`${tag}：五官 ${f} 不在找到的臉 ${g.face.box} 裡，原圖換過就重量 features`);
+      if (set.pick === 'largest' && g.face.area < g.N * g.N * 0.02) throw new Error(`${tag}：找到的臉只有 ${g.face.area} 像素，皮膚色的門檻可能不適用這張圖`);
+      if (set.pick === 'features' && g.face.cover < 0.4) throw new Error(`${tag}：找到的臉只佔五官框的 ${g.face.cover}，皮膚色的門檻可能不適用這張圖，或 features 沒框在臉上`);
+      const c = to(g.crop);
+      marks[s][m] = { head: to(g.head), face: to(f), crop: [c[0], c[1], +(c[2] - c[0]).toFixed(1)] };
+      const kb = Math.round(b64(g.webp).length / 1024);
+      console.log(`${tag}：原圖 ${g.N}×${g.N}，臉 ${g.face.box.join(',')}（佔五官框 ${g.face.cover}）、頭頂 ${g.head[1]}（原圖像素）；貼圖 ${g.size.join('×')}、WebP ${kb} KB；量測 ${g.measureMs} ms、解碼 ${g.decodeMs} ms`);
+      if (g.front) {
+        const { solid, same, shown, worst, mean } = g.front;
+        if (!solid || mean > FRONT_MAX_MEAN_DIFF) throw new Error(`${tag}：前景層跟本體平均差 ${mean}（${solid} 個不透明像素），疊上去會看到切線，多邊形或座標換算有誤`);
+        console.log(`  前景層：WebP ${Math.round(b64(g.front.url).length / 1024)} KB（品質 ${FRONT_QUALITY}），看得到的 ${shown} 像素（佔貼圖 ${(shown / TEX[0] / TEX[1] * 100).toFixed(1)}%）；不透明的 ${solid} 像素跟本體差 2 以內的 ${same} 個，最大差 ${worst}、平均 ${mean}`);
+      }
     }
   }
 
-  const js = `// 由 tools/make_dealer_art.js 產生，不准手改：荷官五種表情的點陣插畫（WebP，${TEX.join('×')}，品質 ${QUALITY}）。
-// 原圖在 tests/fixtures/dealer_art/。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
-// source 是原圖與產生器的雜湊：換了原圖或改了產生器卻沒重跑，tests/check_dealer.js 會紅。
+  const setJs = s => `      ${s}: {
+        marks: {
+${MOODS.map(m => `          ${m}: ${JSON.stringify(marks[s][m])},`).join('\n')}
+        },
+        images: {
+${MOODS.map(m => `          ${m}: '${got[s][m].webp}',`).join('\n')}
+        },
+        front: {
+${MOODS.filter(m => got[s][m].front).map(m => `          ${m}: '${got[s][m].front.url}',`).join('\n')}
+        },
+      },`;
+  const js = `// 由 tools/make_dealer_art.js 產生，不准手改：兩套荷官（${SET_NAMES.join('、')}）五種表情的點陣插畫（WebP，${TEX.join('×')}，品質 ${QUALITY}）。
+// 原圖在 ${SET_NAMES.map(s => `tests/fixtures/${SETS[s].dir}/`).join('、')}。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
+// source 是兩套原圖與產生器的雜湊：換了原圖或改了產生器卻沒重跑，tests/check_dealer_art.js 會紅。
 // marks 是立牌座標（${VB.join('×')}）：head＝臉加頭髮 [左, 上, 右, 下]，對白泡泡避開它；face＝五官；crop＝大特寫 [左, 上, 邊長]
-// front 是前景層（同大小、其餘透明，品質 ${FRONT_QUALITY}）：發牌那張的手臂、手和牌，dealer.js 畫在籌碼架前面
+// front 是前景層（同大小、其餘透明，品質 ${FRONT_QUALITY}）：只有量了多邊形的表情才有，dealer.js 畫在籌碼架前面
 (function () {
   const V = window.BJK.view;
   V.dealerArt = {
     source: '${sourceHash()}',
     size: ${JSON.stringify(TEX)},
-    marks: {
-${MOODS.map(m => `      ${m}: ${JSON.stringify(marks[m])},`).join('\n')}
-    },
-    images: {
-${MOODS.map(m => `      ${m}: '${got[m].webp}',`).join('\n')}
-    },
-    front: {
-${MOODS.filter(m => got[m].front).map(m => `      ${m}: '${got[m].front.url}',`).join('\n')}
+    sets: {
+${SET_NAMES.map(setJs).join('\n')}
     },
   };
 })();
 `;
   fs.writeFileSync(TARGET, js);
-  const bin = MOODS.reduce((s, m) => s + b64(got[m].webp).length + (got[m].front ? b64(got[m].front.url).length : 0), 0);
-  console.log(`✔ 寫入 ${path.relative(process.cwd(), TARGET)}：${Math.round(Buffer.byteLength(js) / 1024)} KB（WebP 本身 ${Math.round(bin / 1024)} KB）；` +
-    `五張加前景層解碼後 ${(TEX[0] * TEX[1] * 4 * (MOODS.length + Object.keys(FRONT).length) / 1e6).toFixed(1)} MB；對照圖在 ${path.relative(process.cwd(), OUT)}\\art-<表情>-marks.png`);
+  for (const s of SET_NAMES) {
+    const bin = MOODS.reduce((n, m) => n + b64(got[s][m].webp).length + (got[s][m].front ? b64(got[s][m].front.url).length : 0), 0);
+    const count = MOODS.length + Object.keys(SETS[s].front).length;
+    console.log(`${s}：WebP ${Math.round(bin / 1024)} KB；五張${count > MOODS.length ? '加前景層' : ''}解碼後 ${(TEX[0] * TEX[1] * 4 * count / 1e6).toFixed(1)} MB（同時只解碼一套）`);
+  }
+  console.log(`✔ 寫入 ${path.relative(process.cwd(), TARGET)}：${Math.round(Buffer.byteLength(js) / 1024)} KB；對照圖在 ${path.relative(process.cwd(), OUT)}\\art-<套>-<表情>-marks.png`);
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { MOODS, TEX, SRC, TARGET, FRONT, sourceHash };
+module.exports = { MOODS, TEX, SETS, SET_NAMES, srcOf, TARGET, sourceHash };

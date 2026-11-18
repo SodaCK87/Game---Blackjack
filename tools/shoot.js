@@ -6,14 +6,15 @@
 //       node tools/shoot.js [檔名前綴] --cards   J、Q、K 與牌背、籌碼的貼圖原寸排一張，中間一排縮成手機上一張牌的大小
 //       node tools/shoot.js [檔名前綴] --reset   籌碼重置的確認視窗開著（桌機、矮的直式手機各一張）、按下重置之後各一張，
 //                                                 外加矮的直式手機戰績視窗開著一張（兩種視窗都蓋遮罩）
-//       以上都可以再加 --classic，改用舊版荷官造型
+//       以上都可以再加 --qipao 改用旗袍荷官、--classic 改用舊版荷官造型（不加是開頁的預設：西裝荷官）
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { availableBrowsers, withPage } = require('../tests/browser_util');
 const { DRAWER_SETTLED, BUBBLE_LINES } = require('../tests/ui_util');
 
-const init = process.argv.includes('--classic') ? `localStorage.setItem('bjk.prefs.v1', '{"look":"classic"}');` : '';
+const look = ['qipao', 'classic'].find(l => process.argv.includes(`--${l}`));
+const init = look ? `localStorage.setItem('bjk.prefs.v1', '{"look":"${look}"}');` : '';
 const DESKTOP = { size: [1280, 720], mobile: false, init };
 const PHONE = { size: [390, 844], mobile: true, init };
 // 矮的直式（BJK-11）：真手機網址列吃掉一截

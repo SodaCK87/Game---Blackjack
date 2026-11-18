@@ -1,8 +1,8 @@
-// 守發牌那張的前景層（v0.26.0）：桌機上荷官伸出來的手和牌原本被籌碼架擋掉，前景層把它們畫在籌碼架前面；
-// 只在橫式畫面的發牌表情畫（直式畫面手和牌本來就在籌碼架上方）。
+// 守旗袍那套發牌那張的前景層（v0.26.0）：桌機上荷官伸出來的手和牌原本被籌碼架擋掉，前景層把它們畫在籌碼架前面；
+// 只在旗袍造型、橫式畫面的發牌表情畫（直式畫面手和牌本來就在籌碼架上方）。西裝那套（預設）沒有前景層：發牌時不畫、不多 draw call（v0.27.0）。
 // 做法：同一格畫好幾次讀 GPU 像素——只畫荷官（整張原圖、不裁下緣，不畫籌碼架、牌桌）、整個場景、整個場景但拿掉前景層——逐像素比。
 // 牌與手的位置用原圖像素寫在這裡，跟產生器的多邊形分開量，探針才不會拿產生器自己的答案驗自己。
-// 驗不到：好不好看（看 tools/_shots/art-deal-front-marks.png 與 node tools/shoot.js <前綴> --dealer）；真手機的 GPU；
+// 驗不到：好不好看（看 tools/_shots/art-qipao-deal-front-marks.png 與 node tools/shoot.js <前綴> --dealer --qipao）；真手機的 GPU；
 // 畫面尺寸只量桌機、橫式手機、直式手機三種，更寬或更扁時籌碼架擋到的位置會移，切線露不露出來沒量。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -15,10 +15,12 @@ const { APP, DESKTOP, PHONE, PHONE_LANDSCAPE, url, first, copyWith } = require('
 const DEALER_JS = path.join('js', 'view', 'dealer.js');
 const ART_JS = path.join('js', 'view', 'dealer_art.js');
 const [VB_W, VB_H] = fs.readFileSync(path.join(APP, DEALER_JS), 'utf8').match(/VB_W = (\d+), VB_H = (\d+)/).slice(1).map(Number);
-const N = 1024;   // 原圖邊長（tests/fixtures/dealer_art/deal.webp）
+const N = 1024;   // 原圖邊長（tests/fixtures/dealer_art_qipao/deal.webp）
 // 產生器的多邊形只拿來找切線在哪一列（上緣），以及陽性對照重做一張不羽化的前景層
-const { FRONT } = require('../tools/make_dealer_art');
+const FRONT = require('../tools/make_dealer_art').SETS.qipao.front;
 const CUT = Math.min(...FRONT.deal.map(p => p[1]));
+// 前景層只屬於旗袍那套：量它的都先存好偏好開旗袍；西裝是開頁的預設
+const QIPAO = `localStorage.setItem('bjk.prefs.v1', '{"look":"qipao"}');`;
 
 // 牌（原圖像素）：米白邊往內縮 5 像素的四邊形，左上角被手指壓著的那一截也算在內（手指也在前景層裡）
 const CARD = [[374, 735], [465, 735], [510, 871], [328, 871]];
@@ -116,14 +118,16 @@ const PROBE = `(async () => {
     others[m] = { visible: d.front.visible, calls: calls(), callsWithout: withoutFront(calls), changed };
   }
   d.setMood('deal');
-  return { size: [W, H], zoom: d.zoom, deal, others };
+  return { look: d.look, size: [W, H], zoom: d.zoom, deal, others };
 })()`;
 
-async function probe(dir, viewport) {
-  const r = await withPage(first(), viewport, async page => {
+// look：qipao 先存好偏好；art 是開頁的預設（西裝）
+async function probe(dir, viewport, look = 'qipao') {
+  const r = await withPage(first(), { ...viewport, init: look === 'qipao' ? QIPAO : '' }, async page => {
     await page.goto(url(dir));
     return page.evaluate(PROBE, 60000);
   });
+  assert.strictEqual(r.value.look, look, '量法有誤：開的不是要量的造型');
   return { ...r.value, console: r.console };
 }
 
@@ -141,7 +145,7 @@ function assertHidden(m, shown = true) {
     assert.strictEqual(o.changed, 0, `${mood} 時前景層改到畫面：${why}`);
   }
   const why = JSON.stringify(m.deal);
-  assert.strictEqual(m.deal.visible, shown, shown ? `發牌時前景層沒開：${why}` : `直式畫面發牌時前景層也開著：${why}`);
+  assert.strictEqual(m.deal.visible, shown, shown ? `發牌時前景層沒開：${why}` : `發牌時前景層不該開卻開著：${why}`);
   assert.strictEqual(m.deal.calls, m.deal.callsWithout + (shown ? 1 : 0), `發牌時前景層該多 ${shown ? 1 : 0} 個 draw call：${why}`);
 }
 function assertOnlyHand(m) {
@@ -178,11 +182,33 @@ for (const [name, viewport, shown] of [['橫式手機 844×390', PHONE_LANDSCAPE
   });
 }
 
+// 西裝那套（預設）沒有前景層：橫式畫面發牌時也不畫，五種表情的 draw call 都跟拿掉前景層一樣、畫面逐像素一樣
+function assertNoFront(m) {
+  assertHidden(m, false);
+  assert.strictEqual(m.deal.inside + m.deal.outside, 0, `發牌時前景層改到畫面：${JSON.stringify(m.deal)}`);
+}
+for (const [name, viewport] of [['桌機 1280×720', DESKTOP], ['橫式手機 844×390', PHONE_LANDSCAPE]]) {
+  test(`${first()}・${name}：西裝那套發牌時沒有前景層，draw call 不變、畫面不變`, async t => {
+    const m = await probe(APP, viewport, 'art');
+    t.diagnostic(`draw call 發牌 ${m.deal.calls}（拿掉前景層 ${m.deal.callsWithout}），其他表情 ${Object.values(m.others).map(o => o.calls).join('／')}`);
+    assertNoFront(m);
+    assert.deepStrictEqual(m.console, []);
+  });
+}
+
 // ---- 陽性對照：每條判準各配一個破壞，在暫存複本上改 ----
 function withCopy(file, from, to, fn) {
   const tmp = copyWith(file, from, to);
   return fn(tmp).finally(() => fs.rmSync(tmp, { recursive: true, force: true }));
 }
+
+test('陽性對照：西裝那套借旗袍的前景層，要判成西裝發牌時多畫一層', t =>
+  withCopy(DEALER_JS, '...painted(ART.sets.suit),', '...painted({ ...ART.sets.suit, front: ART.sets.qipao.front }),', async tmp => {
+    const m = await probe(tmp, DESKTOP, 'art');
+    t.diagnostic(`西裝發牌 draw call ${m.deal.calls}（拿掉前景層 ${m.deal.callsWithout}）、改到 ${m.deal.inside + m.deal.outside} 像素`);
+    assert.throws(() => assertNoFront(m), /前景層不該開卻開著/);
+    assert.ok(m.deal.calls === m.deal.callsWithout + 1 && m.deal.inside + m.deal.outside > 0, `破壞後 draw call 或畫面沒變，這條判準分辨不出來：${JSON.stringify(m.deal)}`);
+  }));
 
 test('陽性對照：不加前景層，桌機上牌要判成露出不到九成', t => withCopy(DEALER_JS, 'front.visible = !!tex && landscape;', 'front.visible = false;', async tmp => {
   const m = await probe(tmp, DESKTOP);
@@ -207,7 +233,7 @@ test('陽性對照：前景層每種表情都開著，要判成其他表情多 d
 // 在頁面裡從發牌那張本體挖一張破壞過的前景層（多邊形是原圖像素，不羽化），換進暫存複本的 dealer_art.js
 const cutFront = poly => `(async () => {
   const A = BJK.view.dealerArt, img = new Image();
-  img.src = A.images.deal; await img.decode();
+  img.src = A.sets.qipao.images.deal; await img.decode();
   const [TW, TH] = A.size, k = TH / ${N}, off = (TW - TH) / 2;
   const c = document.createElement('canvas'); c.width = TW; c.height = TH;
   const ctx = c.getContext('2d');
@@ -222,7 +248,7 @@ async function withFront(poly, fn) {
   const window = { BJK: { view: {} } };
   vm.runInNewContext(fs.readFileSync(path.join(APP, ART_JS), 'utf8'), { window });
   const broken = (await withPage(first(), DESKTOP, async page => { await page.goto(url(APP)); return page.evaluate(cutFront(poly), 30000); })).value;
-  return withCopy(ART_JS, window.BJK.view.dealerArt.front.deal, broken, fn);
+  return withCopy(ART_JS, window.BJK.view.dealerArt.sets.qipao.front.deal, broken, fn);
 }
 
 test('陽性對照：前景層切成切線以下整片（手、牌加上整個下半身），要判成蓋到手的範圍以外', t =>
