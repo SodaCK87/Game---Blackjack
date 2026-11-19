@@ -1,5 +1,5 @@
 // 絨布、牌面、牌背、籌碼、佈景的貼圖都用 canvas 畫；J、Q、K 的人物、牌背、籌碼頂面、牆後的大廳、地毯、牆板、桌身木頭、
-// 皮革扶手、絨布的質感貼的是使用者用 GPT 生的點陣插畫（table_art.js），角標、面額、牌背中央的 21、明暗、縫線、亮漆、
+// 皮革扶手、絨布的質感與中央的紋章、發牌盒貼的是使用者用 GPT 生的點陣插畫（table_art.js），角標、面額、牌背中央的 21、明暗、縫線、亮漆、
 // 壁燈暖光、絨布上的金線與字仍由這裡畫上去。
 // 光澤、暗角、高光也一律畫進貼圖：開頁畫一次，之後每一格都不必再算，手機才省電（使用者 2026-10-31 選的做法）
 (function () {
@@ -56,6 +56,7 @@
     ...Object.entries(ART.chips.values).map(([value, c]) => decode(`chip${value}`, c.image)),
     decode('lobby', ART.lobby.image),
     ...Object.entries(ART.scene).map(([name, s]) => decode(`scene_${name}`, s.image)),
+    ...Object.entries(ART.props).map(([name, s]) => decode(`prop_${name}`, s.image)),
   ]).then(failed => {
     failed = failed.filter(Boolean);
     if (failed.length) console.warn(`這台瀏覽器解不開插畫（${failed.join('、')}），改用純色`);
@@ -81,7 +82,7 @@
   // 佈景插畫的亮度倍數（canvas 的 sRGB 值相乘）：使用者要佈景壓暗、不搶牌桌，畫面上每種材質跟 canvas 版同一級——
   // 亮度（luma）不比 canvas 版亮、最亮那個色道不比它暗。木頭是深紅，照亮度對齊要乘 10 倍、紅色道整片爆掉，所以只對齊最亮的色道。
   // 2026-11-18 照 tests/check_textures.js 的量法（只留那一種材質再畫一次）調的，數字見 docs\版本紀錄.md v0.22.0
-  const TONE = { carpet: 0.75, wall: 1, leather: 2.8, wood: 3.7 };
+  const TONE = { carpet: 0.75, wall: 1, leather: 2.8, wood: 3.7, shoe: 0.7 };
   // 插畫從原點起鋪滿，亮度乘 k：k < 1 蓋一層黑，k > 1 用 lighter 再疊
   function fillArt(ctx, img, w, h, k) {
     const p = ctx.createPattern(img, 'repeat');
@@ -148,6 +149,10 @@
 
   // 半圓絨布：畫布上緣＝荷官那條直邊，下緣＝最靠近玩家的弧頂；1 單位＝H/R 像素
   const FELT = [2048, 1024];
+  // 紋章印在荷官的牌（table.js dealer.hand，z＝1.2）底下：上緣離第二行字（r 1.85）、下緣離籌碼架（到 z 0.72）各留一點；
+  // 比線與字淡一點，不搶規則字。下注時桌上沒牌看得到，發牌後被荷官的牌蓋住
+  const EMBLEM = { z: 1.2, h: 0.78, alpha: 0.7 };
+  let emblemRect = null;
   function felt(ctx, R, seatDeg, seatR, playerSeat) {
     const [W, H] = FELT, s = H / R, cx = W / 2, cy = 0;
     // 燈照到的中央偏亮、往桌緣沉下去
@@ -181,6 +186,11 @@
     g.lineWidth = 1.5;
     g.beginPath(); g.arc(cx, cy, 4.2 * s, A0, A1); g.stroke();
     for (const a of [A0, A1]) drawSuit(g, 'D', cx + 4.25 * s * Math.cos(a), cy + 4.25 * s * Math.sin(a), 46, false, '#fff');
+    if (art.prop_emblem) {
+      const [ew, eh] = ART.props.emblem.size, h = EMBLEM.h * s, w = h * ew / eh;
+      emblemRect = [cx - w / 2, cy + EMBLEM.z * s - h / 2, w, h];
+      g.globalAlpha = EMBLEM.alpha; g.drawImage(art.prop_emblem, ...emblemRect); g.globalAlpha = 1;
+    }
     seatDeg.forEach(deg => {
       const a = deg * Math.PI / 180, x = cx + seatR * s * Math.cos(a), y = cy + seatR * s * Math.sin(a);
       g.beginPath(); g.arc(x, y, 0.42 * s, 0, 2 * Math.PI);
@@ -508,6 +518,14 @@
     return toTexture(c);
   }
 
+  // 發牌盒：側面、正面、頂面由產生器拼在同一張，table.js 照 rects 改盒子各面的 UV，一個材質、一個 draw call。
+  // 插畫的皮革（亮度約 38）比原本的純色盒子（#151c20，約 27）亮，壓到同一級
+  function shoe(ctx) {
+    const [W, H] = ART.props.shoe.size;
+    if (art.prop_shoe) { fillArt(ctx, art.prop_shoe, W, H, TONE.shoe); return; }
+    ctx.fillStyle = '#151c20'; ctx.fillRect(0, 0, W, H);
+  }
+
   // ---- 佈景（room.js）：使用者要求整體壓暗；插畫的亮度照 canvas 版調（TONE），canvas 版的花紋只比底色亮一點點 ----
   // 牌桌在地毯上的影子：畫布上緣＝桌子直邊，下緣＝弧頂再往外 pad 單位
   function tableShadow(R, pad) {
@@ -632,6 +650,10 @@
     woodPanel: () => cached('woodPanel', () => tiling(...ART.scene.wall.size, woodPanel)),
     tableShadow: (R, pad) => cached('tableShadow', () => tableShadow(R, pad)),
     brass: () => cached('brass', brass),
+    shoe: () => cached('shoe', () => painted(...ART.props.shoe.size, shoe)),
+    SHOE: ART.props.shoe,
+    // 絨布上紋章畫在哪（絨布畫布的像素 [x, y, 寬, 高]），插畫還沒解碼好或解不開是 null；探針用
+    emblemRect: () => emblemRect,
     lobby: () => cached('lobby', lobby),
   };
 })();

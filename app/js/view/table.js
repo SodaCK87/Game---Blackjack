@@ -5,6 +5,7 @@
   const SEAT_DEG = [150, 120, 90, 60, 30];   // 從玩家看過去由左到右
   const PLAYER_SEAT = 2;
   const SEAT_R = 3.55, HAND_R = 2.85;
+  const TRAY_TINT = 0x8c8c8c;
 
   function polar(r, deg, y) {
     const a = deg * Math.PI / 180;
@@ -59,7 +60,11 @@
     // 籌碼架
     const rng = V.rng(21);
     const rack = new THREE.Group();
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 0.6), std(0x1f1611));
+    // 跟桌身同一張木紋（那張橫向重複 6 次繞半圈，一個重複 2.72 單位），UV 縮回一個重複正好鋪滿 2.7 寬；壓暗一級，籌碼才跳得出來
+    const trayGeo = new THREE.BoxGeometry(2.7, 0.1, 0.6), trayUV = trayGeo.attributes.uv;
+    for (let i = 0; i < trayUV.count; i++) trayUV.setX(i, trayUV.getX(i) / V.textures.wood().repeat.x);
+    const tray = new THREE.Mesh(trayGeo, std(TRAY_TINT, { map: V.textures.wood() }));
+    tray.name = 'chipTray';
     tray.position.y = 0.05;
     tray.castShadow = tray.receiveShadow = true;
     rack.add(tray);
@@ -75,7 +80,15 @@
     function facing(obj) { obj.rotation.y = Math.atan2(aimAt.x - obj.position.x, aimAt.z - obj.position.z); }
 
     const shoe = new THREE.Group();
-    const shoeBody = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.34, 0.95), std(0x151c20));
+    // 盒子六面原本各自鋪滿整張貼圖，改成拼圖裡的那一塊：±x 側面、±y 頂面（底面看不到）、±z 正面（+z 朝桌面中央，背面看不到）
+    const shoeGeo = new THREE.BoxGeometry(0.66, 0.34, 0.95), shoeUV = shoeGeo.attributes.uv;
+    const { size: [AW, AH], rects } = V.textures.SHOE;
+    ['side', 'side', 'top', 'top', 'front', 'front'].forEach((k, face) => {
+      const [x, y, w, h] = rects[k];
+      for (let i = face * 4; i < face * 4 + 4; i++) shoeUV.setXY(i, (x + shoeUV.getX(i) * w) / AW, 1 - (y + (1 - shoeUV.getY(i)) * h) / AH);
+    });
+    const shoeBody = new THREE.Mesh(shoeGeo, std(0xffffff, { map: V.textures.shoe() }));
+    shoeBody.name = 'shoe';
     shoeBody.position.y = 0.17;
     shoeBody.castShadow = true;
     shoe.add(shoeBody);

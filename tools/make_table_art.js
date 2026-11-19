@@ -1,13 +1,13 @@
-// 把牌桌上的點陣插畫（tests/fixtures/ 底下的 card_art、chip_art、room_art、scene_art）縮成貼圖要的大小，
+// 把牌桌上的點陣插畫（tests/fixtures/ 底下的 card_art、chip_art、room_art、scene_art、prop_art）縮成貼圖要的大小，
 // 寫成 app/js/view/table_art.js（不准手改）。換了原圖、改了這支的任何一行就重跑：node tools/make_table_art.js
 // 另外在 tools/_shots/ 留量測對照圖（不進版控）：table-art-marks.png 標籌碼的盤面（橘）、中央空白（青）、取樣邊環（洋紅）與嵌片方位（黃）、
-// 牌背中央的圓（青）、大廳的牆線（橘）與構圖中心（青）；scene-art-tiles.png 是佈景五張產出各自平鋪 2×2，看接縫
+// 牌背中央的圓（青）、大廳的牆線（橘）與構圖中心（青）；scene-art-tiles.png 是佈景五張產出各自平鋪 2×2，看接縫；prop-art-marks.png 是發牌盒原圖拿掉的列（紅）與拼好的那張（青框）
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures');
-const DIRS = ['card_art', 'chip_art', 'room_art', 'scene_art'];
+const DIRS = ['card_art', 'chip_art', 'room_art', 'scene_art', 'prop_art'];
 const TARGET = path.join(__dirname, '..', 'app', 'js', 'view', 'table_art.js');
 const OUT = path.join(__dirname, '_shots');
 const COURTS = ['king_red', 'queen_red', 'jack_red', 'king_black', 'queen_black', 'jack_black'];
@@ -41,6 +41,23 @@ const SCENE = {
   wall: { out: [512, 166], panels: 2, segment: [4, 1.3], quality: 0.95 },
 };
 const SCENE_NAMES = Object.keys(SCENE);
+
+// 道具（prop_art）：發牌盒三面拼成一張、絨布紋章。
+// 發牌盒是 table.js 的 0.66×0.34×0.95 盒子，GPT 只出 3:2，所以拿掉素面皮革的那幾列（欄）湊成那一面的比例，金邊與圖案原樣留著。
+// keep 是留下的原圖列（欄）區間，2026-11-19 照原圖手量（金邊在最外 2～12 像素、黑桃 448～563 列、出牌口 639～738 列），
+// 拿掉的範圍裡有金色或黑色就擲錯（換了圖要重量），對照圖 tools/_shots/prop-art-marks.png。
+// 一面每單位 256 像素：發牌盒在平板上一單位最多約 150 裝置像素（跟絨布同一個距離），拼成 512×256 一張，每塊外圍外推 4 像素擋 mipmap 滲色
+const SHOE = {
+  box: { x: 0.66, y: 0.34, z: 0.95 }, density: 256, atlas: [512, 256], pad: 4,
+  faces: {
+    side: { src: 'shoe_side', rows: [[0, 14], [244, 766], [1010, 1024]], at: [4, 4], dims: ['z', 'y'] },
+    front: { src: 'shoe_front', rows: [[0, 20], [253, 1024]], at: [4, 99], dims: ['x', 'y'] },
+    // 頂面拿側板去掉黑桃的那一段（只剩素面與金邊），拿掉的本來就有圖案，不檢查
+    top: { src: 'shoe_side', cols: [[0, 698], [1522, 1536]], at: [259, 4], dims: ['x', 'z'], dropsMotif: true },
+  },
+};
+// 紋章：只取形狀（亮度當不透明度），textures.js 用絨布上金線同一層燙金畫在荷官的牌底下，高 0.78 單位＝絨布畫布約 160 像素，產出 240 高留點餘裕
+const EMBLEM_H = 240;
 
 // 原圖與這支的內容一起算雜湊，寫進產出檔；tests/check_table_art.js 拿同一支比對，對不上就是改了沒重跑
 function sourceHash({ script = fs.readFileSync(__filename, 'utf8'), dir = FIX } = {}) {
@@ -282,6 +299,94 @@ const sceneWork = (src, cfg) => `(async () => {
   }
 })()`;
 
+// 發牌盒：每一面照 keep 的列與欄把原圖接起來（沒給的那一向整條留著），縮到那一面的大小貼進拼圖，四邊各外推 pad 像素
+const shoeWork = (srcs, cfg) => `(async () => {
+  ${HELPERS}
+  const CFG = ${JSON.stringify(cfg)}, SRCS = ${JSON.stringify(srcs)};
+  const imgs = {};
+  for (const [k, u] of Object.entries(SRCS)) imgs[k] = await load(u);
+  const [AW, AH] = CFG.atlas, atlas = canvas(AW, AH), actx = atlas.getContext('2d');
+  const rects = {}, removed = {};
+  for (const [name, f] of Object.entries(CFG.faces)) {
+    const img = imgs[f.src], W = img.naturalWidth, H = img.naturalHeight;
+    const rows = f.rows || [[0, H]], cols = f.cols || [[0, W]];
+    const full = canvas(W, H), fctx = full.getContext('2d', { willReadFrequently: true });
+    fctx.drawImage(img, 0, 0);
+    const p = fctx.getImageData(0, 0, W, H).data;
+    // 拿掉的列（欄）只能是素面：金色（紅比藍多 50 以上）或黑色（三色道加起來不到 40）都算圖案；最外 20 像素的金邊不算
+    const motif = (x, y) => { const o = (y * W + x) * 4; return (p[o] > 120 && p[o] - p[o + 2] > 50) || p[o] + p[o + 1] + p[o + 2] < 40; };
+    const gaps = list => { const out = []; let at = 0; for (const [a, b] of list) { if (a > at) out.push([at, a]); at = b; } return out; };
+    let hit = 0;
+    for (const [a, b] of gaps(rows)) for (let y = a; y < b; y++) for (let x = 20; x < W - 20; x++) if (motif(x, y)) hit++;
+    for (const [a, b] of gaps(cols)) for (let x = a; x < b; x++) for (let y = 20; y < H - 20; y++) if (motif(x, y)) hit++;
+    if (hit && !f.dropsMotif) throw new Error(name + '：拿掉的範圍裡有 ' + hit + ' 個金色或黑色像素，原圖換過就重量 SHOE 的 keep');
+    removed[name] = { rows: gaps(rows), cols: gaps(cols) };
+    const sw = cols.reduce((s, [a, b]) => s + b - a, 0), sh = rows.reduce((s, [a, b]) => s + b - a, 0);
+    const joined = canvas(sw, sh), jctx = joined.getContext('2d');
+    let dy = 0;
+    for (const [ya, yb] of rows) { let dx = 0; for (const [xa, xb] of cols) { jctx.drawImage(img, xa, ya, xb - xa, yb - ya, dx, dy, xb - xa, yb - ya); dx += xb - xa; } dy += yb - ya; }
+    const [du, dv] = f.dims, w = Math.round(CFG.box[du] * CFG.density), h = Math.round(CFG.box[dv] * CFG.density);
+    const want = CFG.box[du] / CFG.box[dv], got = sw / sh;
+    if (Math.abs(got / want - 1) > 0.01) throw new Error(name + '：接起來是 ' + sw + '×' + sh + '（' + got.toFixed(3) + '），盒子那一面要 ' + want.toFixed(3));
+    const bmp = await createImageBitmap(joined, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+    const [x, y] = f.at, P = CFG.pad;
+    actx.drawImage(bmp, x, y);
+    // 外推：最外一列（欄）拉寬蓋到 pad 裡，縮小看的 mipmap 不會混進隔壁那一面或空白
+    actx.drawImage(atlas, x, y, w, 1, x, y - P, w, P); actx.drawImage(atlas, x, y + h - 1, w, 1, x, y + h, w, P);
+    actx.drawImage(atlas, x, y - P, 1, h + 2 * P, x - P, y - P, P, h + 2 * P); actx.drawImage(atlas, x + w - 1, y - P, 1, h + 2 * P, x + w, y - P, P, h + 2 * P);
+    rects[name] = [x, y, w, h];
+    for (const [k, r] of Object.entries(rects)) if (k !== name && x < r[0] + r[2] + 2 * P && r[0] < x + w + 2 * P && y < r[1] + r[3] + 2 * P && r[1] < y + h + 2 * P) throw new Error(name + ' 跟 ' + k + ' 在拼圖裡疊到了');
+    if (x - P < 0 || y - P < 0 || x + w + P > AW || y + h + P > AH) throw new Error(name + ' 超出拼圖');
+  }
+  return { ...await encode(atlas, CFG.quality), rects, removed };
+})()`;
+
+// 紋章：量亮的地方的外框、四周留 2%，亮度當不透明度、顏色一律白（textures.js 再上燙金）
+const emblemWork = (src, cfg) => `(async () => {
+  ${HELPERS}
+  const CFG = ${JSON.stringify(cfg)};
+  const img = await load(${JSON.stringify(src)});
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const full = canvas(W, H), fctx = full.getContext('2d', { willReadFrequently: true });
+  fctx.drawImage(img, 0, 0);
+  const p = fctx.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (lum(p, (y * W + x) * 4) > 128) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const m = Math.round(0.02 * Math.max(x1 - x0, y1 - y0));
+  x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W - 1, x1 + m); y1 = Math.min(H - 1, y1 + m);
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1, h = CFG.height, w = Math.round(h * bw / bh);
+  const bmp = await createImageBitmap(img, x0, y0, bw, bh, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+  const c = canvas(w, h), ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const d = ctx.getImageData(0, 0, w, h);
+  for (let i = 0; i < d.data.length; i += 4) { const a = lum(d.data, i); d.data[i] = d.data[i + 1] = d.data[i + 2] = 255; d.data[i + 3] = a; }
+  ctx.putImageData(d, 0, 0);
+  return { ...await encode(c, CFG.quality), box: [x0, y0, bw, bh] };
+})()`;
+
+// 道具的對照圖：發牌盒兩張原圖縮四分之一、拿掉的列（欄）蓋紅，旁邊是拼好的那張原寸
+const propMarksWork = (items, cfg) => `(async () => {
+  ${HELPERS}
+  const ITEMS = ${JSON.stringify(items)}, k = 0.25;
+  const side = await load(ITEMS.side), front = await load(ITEMS.front), atlas = await load(ITEMS.atlas);
+  const c = canvas(1536 * k * 2 + 48 + atlas.naturalWidth, Math.max(1024 * k + 32, atlas.naturalHeight + 32)), ctx = c.getContext('2d');
+  ctx.fillStyle = '#212C31'; ctx.fillRect(0, 0, c.width, c.height);
+  const shade = (img, x0, list) => {
+    ctx.drawImage(img, x0, 16, img.naturalWidth * k, img.naturalHeight * k);
+    ctx.fillStyle = 'rgba(255,0,0,0.45)';
+    for (const r of list) {
+      for (const [a, b] of r.rows) ctx.fillRect(x0, 16 + a * k, img.naturalWidth * k, (b - a) * k);
+      for (const [a, b] of r.cols) ctx.fillRect(x0 + a * k, 16, (b - a) * k, img.naturalHeight * k);
+    }
+  };
+  shade(side, 16, [ITEMS.removed.side]);
+  shade(front, 32 + 1536 * k, [ITEMS.removed.front]);
+  ctx.drawImage(atlas, 48 + 1536 * k * 2, 16);
+  ctx.strokeStyle = '#00e5e5';
+  for (const [x, y, w, h] of Object.values(ITEMS.rects)) ctx.strokeRect(48 + 1536 * k * 2 + x - 0.5, 16 + y - 0.5, w + 1, h + 1);
+  return c.toDataURL('image/png');
+})()`;
+
 // 佈景五張的產出各自平鋪（牆板橫向接兩段），看接縫用
 const tilesWork = items => `(async () => {
   ${HELPERS}
@@ -350,6 +455,11 @@ async function main() {
     got.scene = {};
     for (const name of SCENE_NAMES) got.scene[name] = await page.evaluate(sceneWork(url(`scene_art/${name}.webp`), SCENE[name]), 120000);
     fs.writeFileSync(path.join(OUT, 'scene-art-tiles.png'), b64(await page.evaluate(tilesWork(SCENE_NAMES.map(n => ({ url: got.scene[n].url }))), 60000)));
+    got.shoe = await page.evaluate(shoeWork({ shoe_side: url('prop_art/shoe_side.webp'), shoe_front: url('prop_art/shoe_front.webp') }, { ...SHOE, quality: QUALITY }), 120000);
+    got.emblem = await page.evaluate(emblemWork(url('prop_art/emblem.webp'), { height: EMBLEM_H, quality: QUALITY }), 60000);
+    fs.writeFileSync(path.join(OUT, 'prop-art-marks.png'), b64(await page.evaluate(propMarksWork({
+      side: url('prop_art/shoe_side.webp'), front: url('prop_art/shoe_front.webp'), atlas: got.shoe.url, removed: got.shoe.removed, rects: got.shoe.rects,
+    }), 60000)));
     return got;
   });
   for (const line of r.console) console.log(`  主控台：${line}`);
@@ -384,6 +494,9 @@ async function main() {
       `${g.faded.some(Boolean) ? `，交疊 ${g.faded.map((f, a) => (f ? `${a ? '上下' : '左右'} ${SCENE[name].fade[a]}` : '')).filter(Boolean).join('、')}` : '，不必處理'}${SCENE[name].gray ? `；只取明暗，原圖平均亮度 ${g.mean}` : ''}`);
     for (const s of g.seam) if (s !== null && s.r > s.p99) throw new Error(`${name}：產出的接縫 ${s.r} 超過內部相鄰像素差的 P99 ${s.p99}`);
   }
+  const S = got.shoe, E = got.emblem;
+  console.log(`shoe：${S.size.join('×')}、WebP ${kb(S.url)} KB；${Object.entries(S.rects).map(([k, r]) => `${k} ${r.join(',')}`).join('、')}`);
+  console.log(`emblem：原圖外框 ${E.box.join(', ')} → ${E.size.join('×')}、WebP ${kb(E.url)} KB`);
   if (L.wall < 0.8) throw new Error(`大廳的牆線只在裁切高度的 ${L.wall}，門檻 dark 不適用這張圖`);
   if (LOBBY_FOCUS >= L.wallSrc) throw new Error(`大廳的構圖中心 ${LOBBY_FOCUS} 在牆線 ${L.wallSrc} 下面，原圖換過就重量 LOBBY_FOCUS`);
 
@@ -392,13 +505,14 @@ async function main() {
     return `        ${v}: { inner: ${inner}, center: '${center}', base: '${base}', stripe: '${stripe}', phase: ${phase}, duty: ${duty}, image: '${u}' },`;
   };
   const sceneLine = n => `      ${n}: { size: ${JSON.stringify(got.scene[n].size)}, image: '${got.scene[n].url}' },`;
-  const js = `// 由 tools/make_table_art.js 產生，不准手改：牌面人物、牌背、籌碼頂面、大廳、佈景材質的點陣插畫（WebP，品質 ${QUALITY}）。
-// 原圖在 tests/fixtures/card_art、chip_art、room_art、scene_art。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
+  const js = `// 由 tools/make_table_art.js 產生，不准手改：牌面人物、牌背、籌碼頂面、大廳、佈景材質、道具的點陣插畫（WebP，品質 ${QUALITY}）。
+// 原圖在 tests/fixtures/card_art、chip_art、room_art、scene_art、prop_art。走 data: URL 是因為 file:// 下外部圖檔上傳 WebGL 會被當成跨來源擋掉（2026-11-07 Edge 實測 SecurityError）。
 // source 是原圖與產生器的雜湊：換了原圖或改了產生器卻沒重跑，tests/check_table_art.js 會紅。
 // court：J、Q、K 的人物（左右鏡像過），${COURT.join('×')}；back：牌背，${CARD.join('×')}，hole 是中央空圓 [圓心 x, y, 半徑 x, y]（牌面像素）；
 // chips：頂面 ${CHIP}×${CHIP}，values 照面額，inner 是中央空白的半徑（盤面半徑的比例），base／stripe 是邊環的底色與嵌片色，phase 是第一片嵌片的方位（度，0＝右、逆時針），duty 是嵌片佔邊環的比例；
 // lobby：大廳，wall 是牆線、focus 是構圖中心（都是圖高的比例）；
-// scene：佈景材質，都已處理成可平鋪：carpet 地毯一格、felt 絨布的明暗（灰階，128＝不變）、leather 扶手、wood 桌身、wall 牆板一段（鑲板兩塊）
+// scene：佈景材質，都已處理成可平鋪：carpet 地毯一格、felt 絨布的明暗（灰階，128＝不變）、leather 扶手、wood 桌身、wall 牆板一段（鑲板兩塊）；
+// props：shoe 發牌盒三面拼成一張，rects 是各面在拼圖裡的 [x, y, 寬, 高]（像素）；emblem 絨布紋章，白色、亮度當不透明度
 (function () {
   const BJK = (window.BJK = window.BJK || {});
   const V = (BJK.view = BJK.view || {});
@@ -421,13 +535,18 @@ ${CHIPS.map(chipLine).join('\n')}
     scene: {
 ${SCENE_NAMES.map(sceneLine).join('\n')}
     },
+    props: {
+      shoe: { size: ${JSON.stringify(S.size)}, rects: ${JSON.stringify(S.rects)}, image: '${S.url}' },
+      emblem: { size: ${JSON.stringify(E.size)}, image: '${E.url}' },
+    },
   };
 })();
 `;
   fs.writeFileSync(TARGET, js);
   const scene = SCENE_NAMES.map(n => got.scene[n]);
   console.log(`佈景五張：WebP ${scene.reduce((s, g) => s + kb(g.url), 0)} KB、解碼後 ${(scene.reduce((s, g) => s + g.size[0] * g.size[1] * 4, 0) / 1e6).toFixed(2)} MB、解碼 ${scene.reduce((s, g) => s + g.decodeMs, 0).toFixed(0)} ms`);
-  const all = [...COURTS.map(n => got.court[n]), got.back, ...CHIPS.map(v => got.chips[v]), L, ...scene];
+  console.log(`道具兩張：WebP ${kb(S.url) + kb(E.url)} KB、解碼後 ${((S.size[0] * S.size[1] + E.size[0] * E.size[1]) * 4 / 1e6).toFixed(2)} MB、解碼 ${(S.decodeMs + E.decodeMs).toFixed(0)} ms`);
+  const all = [...COURTS.map(n => got.court[n]), got.back, ...CHIPS.map(v => got.chips[v]), L, ...scene, S, E];
   const bin = all.reduce((s, g) => s + b64(g.url).length, 0);
   const px = all.reduce((s, g) => s + g.size[0] * g.size[1] * 4, 0);
   console.log(`✔ 寫入 ${path.relative(process.cwd(), TARGET)}：${Math.round(Buffer.byteLength(js) / 1024)} KB（WebP 本身 ${Math.round(bin / 1024)} KB）；` +
@@ -435,4 +554,4 @@ ${SCENE_NAMES.map(sceneLine).join('\n')}
 }
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
-module.exports = { COURTS, CHIPS, CARD, COURT, CHIP, SCENE, SCENE_NAMES, FIX, DIRS, TARGET, sourceHash };
+module.exports = { COURTS, CHIPS, CARD, COURT, CHIP, SCENE, SCENE_NAMES, SHOE, EMBLEM_H, FIX, DIRS, TARGET, sourceHash };

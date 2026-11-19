@@ -1,8 +1,8 @@
-// 守插畫貼圖（textures.js 的牌背、籌碼頂面、J／Q／K 的人物、牆後的大廳、地毯、牆板、桌身木頭、皮革扶手、絨布，圖在 table_art.js）：
+// 守插畫貼圖（textures.js 的牌背、籌碼頂面、J／Q／K 的人物、牆後的大廳、地毯、牆板、桌身木頭、皮革扶手、絨布與中央的紋章、發牌盒，圖在 table_art.js）：
 // 開頁先畫純色版，插畫解碼完補畫一次、標記重傳，dealer.ready 之後那一格就要是插畫。
 // 量的是 GPU 上那一份：同一張貼圖畫進一張離屏的小畫布讀回來，跟 canvas 的平均色比；補畫了卻沒標記重傳，GPU 上還是純色版。
 // 另外守籌碼側面的條紋對齊頂面的嵌片、籌碼只在正擺左右 22.5 度內轉（頂面插畫的光從左上打，轉一整圈光就亂了）；
-// 佈景五張在畫面上跟解不開插畫時的 canvas 版同一級亮（使用者要佈景壓暗）、絨布還是原本的青綠；佈景插畫平鋪接得起來。
+// 佈景五張與發牌盒在畫面上跟解不開插畫時的 canvas 版同一級亮（使用者要佈景壓暗）、絨布還是原本的青綠；佈景插畫平鋪接得起來。
 // 驗不到：好不好看、角標在真手機上讀不讀得出來、地毯花紋搶不搶眼（看 node tools/shoot.js <前綴> --cards 與 --round 的截圖）。
 const test = require('node:test');
 const assert = require('node:assert');
@@ -20,7 +20,7 @@ const PROBE = `(async () => {
   await s.dealer.ready;
   const DENOMS = V.chips.DENOMS;
   const art = { 牌背: T.cardBack(), ...Object.fromEntries(DENOMS.map(v => ['籌碼 ' + v, T.chipAtlas(v)])) };
-  const scene = { 地毯: T.carpet(), 牆板: T.woodPanel(), 桌身木頭: T.wood(), 皮革扶手: T.leather(), 絨布: T.felt() };
+  const scene = { 地毯: T.carpet(), 牆板: T.woodPanel(), 桌身木頭: T.wood(), 皮革扶手: T.leather(), 絨布: T.felt(), 發牌盒: T.shoe() };
 
   // 一、開頁用到的插畫貼圖都在場景裡、而且最新的版本已經傳上 GPU（補畫之後有重畫那一格）
   const used = new Set();
@@ -88,11 +88,11 @@ const PROBE = `(async () => {
     return out;
   };
   const sceneArt = {};
-  for (const [n, s] of Object.entries(V.tableArt.scene)) { const img = new Image(); img.src = s.image; await img.decode(); sceneArt[n] = img; }
-  // 絨布只量直邊中段那一塊：避開金線、字與押注圈
+  for (const [n, s] of Object.entries({ ...V.tableArt.scene, ...V.tableArt.props })) { const img = new Image(); img.src = s.image; await img.decode(); sceneArt[n] = img; }
+  // 絨布只量直邊中段那一塊：避開金線、字、押注圈與紋章（紋章從 y 166 起）
   // 皮革只量兩道縫線以下（縫線的亮暗比皮紋強得多）
-  const region = { 地毯: [0, 0], 牆板: [0, 0], 桌身木頭: [0, 0], 皮革扶手: [0, 112, 256, 144], 絨布: [768, 0, 512, 256] };
-  const source = { 地毯: 'carpet', 牆板: 'wall', 桌身木頭: 'wood', 皮革扶手: 'leather', 絨布: 'felt' };
+  const region = { 地毯: [0, 0], 牆板: [0, 0], 桌身木頭: [0, 0], 皮革扶手: [0, 112, 256, 144], 絨布: [768, 0, 512, 150], 發牌盒: [0, 0] };
+  const source = { 地毯: 'carpet', 牆板: 'wall', 桌身木頭: 'wood', 皮革扶手: 'leather', 絨布: 'felt', 發牌盒: 'shoe' };
   const likeness = Object.fromEntries(Object.entries(scene).map(([k, t]) => {
     const W = t.image.width, H = t.image.height, [x0, y0, w = W, h = H] = region[k];
     const tiled = document.createElement('canvas'); tiled.width = W; tiled.height = H;
@@ -102,6 +102,19 @@ const PROBE = `(async () => {
     for (let i = 0; i < a.length; i++) { ab += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
     return [k, +(ab / Math.sqrt(aa * bb)).toFixed(3)];
   }));
+  // 紋章：絨布上紋章那一塊，跟紋章插畫照同樣位置畫在黑底上比細紋；沒畫上去是 null
+  const er = T.emblemRect();
+  likeness.絨布紋章 = null;
+  if (er) {
+    const fimg = T.felt().image, m = document.createElement('canvas');
+    m.width = fimg.width; m.height = fimg.height;
+    const mctx = m.getContext('2d');
+    mctx.fillStyle = '#000'; mctx.fillRect(0, 0, m.width, m.height); mctx.drawImage(sceneArt.emblem, ...er);
+    const [x, y, w, h] = er.map(Math.round), a = highPass(fimg, x, y, w, h), b = highPass(m, x, y, w, h);
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = 0; i < a.length; i++) { ab += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
+    likeness.絨布紋章 = +(ab / Math.sqrt(aa * bb)).toFixed(3);
+  }
 
   // 四、籌碼側面的條紋對齊頂面的嵌片：照圓柱的 UV，頂面邊上那一點往圓心收到 0.9（嵌片那一圈）、側面同一個角度的中段，
   // 各取一圈亮度，比八片嵌片那個頻率的相位（度）。量的是真的模型 UV，不是自己推的角度；
@@ -196,7 +209,7 @@ function assertSwing(m) {
   assert.ok(m.swing <= 22.5 + 1e-6, `有籌碼轉了 ${m.swing} 度，頂面插畫的光會從別的方向來：${JSON.stringify(m)}`);
 }
 
-test(`${first()}：開頁那一格的牌背、籌碼、大廳、佈景五張就是插畫，GPU 上的跟 canvas 一樣；人物牌畫的是插畫；籌碼側面對齊頂面、只在小角度內轉`, async t => {
+test(`${first()}：開頁那一格的牌背、籌碼、大廳、佈景五張、紋章與發牌盒就是插畫，GPU 上的跟 canvas 一樣；人物牌畫的是插畫；籌碼側面對齊頂面、只在小角度內轉`, async t => {
   const m = await probe(APP);
   t.diagnostic(`顏色數 ${JSON.stringify(m.variety)}；佈景跟插畫的相關係數 ${JSON.stringify(m.likeness)}；GPU 與 canvas 差 ${JSON.stringify(m.gpu)}；條紋錯開 ${JSON.stringify(m.stripes)}；籌碼 ${m.chips} 片、最大轉角 ${m.swing} 度`);
   assertUploaded(m);
@@ -218,6 +231,12 @@ test('陽性對照：插畫解碼完不補畫，要判成純色版、佈景不�
   assert.throws(() => assertArt(m), /純色版不是插畫/);
   for (const k of Object.keys(m.likeness)) assert.throws(() => assertSceneArt({ likeness: { [k]: m.likeness[k] } }), /畫的不是插畫/, `${k} 沒補畫卻判成插畫：${JSON.stringify(m.likeness)}`);
   assert.throws(() => assertUploaded(m), /大廳那張圖沒貼上/);
+}));
+
+test('陽性對照：紋章沒畫上絨布，要判成絨布紋章不是插畫', () => withCopy(TEXTURES, 'g.drawImage(art.prop_emblem, ...emblemRect);', '', async tmp => {
+  const m = await probe(tmp);
+  assertSceneArt({ likeness: { 絨布: m.likeness.絨布 } });
+  assert.throws(() => assertSceneArt({ likeness: { 絨布紋章: m.likeness.絨布紋章 } }), /絨布紋章 的細紋跟插畫的相關係數/);
 }));
 
 test('陽性對照：補畫了不標記重傳，要判成 GPU 上的跟 canvas 對不上', () => withCopy(TEXTURES, 'draw(ctx); t.dispose(); t.needsUpdate = true;', 'draw(ctx);', async tmp => {
@@ -254,7 +273,7 @@ test('陽性對照：籌碼轉一整圈，要判成光從別的方向來', () =>
 const SCENE_LUM = `(async () => {
   const s = BJK.view.stage, T = BJK.view.textures, R = s.renderer;
   await s.dealer.ready;
-  const targets = { 地毯: T.carpet(), 牆板: T.woodPanel(), 桌身木頭: T.wood(), 皮革扶手: T.leather(), 絨布: T.felt() };
+  const targets = { 地毯: T.carpet(), 牆板: T.woodPanel(), 桌身木頭: T.wood(), 皮革扶手: T.leather(), 絨布: T.felt(), 發牌盒: T.shoe() };
   const gl = R.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
   const meshes = [];
   s.scene.traverse(o => { if (o.isMesh) meshes.push(o); });
@@ -285,7 +304,7 @@ const NO_SCENE_ART = `(() => {
   const decode = HTMLImageElement.prototype.decode;
   HTMLImageElement.prototype.decode = function () {
     const art = window.BJK && BJK.view && BJK.view.tableArt;
-    if (art && Object.values(art.scene).some(s => s.image === this.src)) return Promise.reject(new Error('探針：當成解不開'));
+    if (art && Object.values({ ...art.scene, ...art.props }).some(s => s.image === this.src)) return Promise.reject(new Error('探針：當成解不開'));
     return decode.call(this);
   };
 })();`;
@@ -318,18 +337,19 @@ function assertFeltColor(art, plain) {
 }
 const pick = (o, ...keys) => Object.fromEntries(keys.map(k => [k, o[k]]));
 
-test(`${first()}：佈景五張貼上插畫後，畫面上的亮度跟 canvas 版同一級、絨布還是青綠；插畫解不開時照樣畫得出來`, async t => {
+test(`${first()}：佈景五張與發牌盒貼上插畫後，畫面上的亮度跟 canvas 版同一級、絨布還是青綠；插畫解不開時照樣畫得出來`, async t => {
   const [art, plain] = [await sceneLum(APP), await plainLum()];
   t.diagnostic(`插畫 ${JSON.stringify(art.lum)}；canvas 版 ${JSON.stringify(plain.lum)}`);
   assert.deepStrictEqual(art.console, []);
-  assert.deepStrictEqual(plain.console, ['warning: 這台瀏覽器解不開插畫（scene_carpet、scene_felt、scene_leather、scene_wood、scene_wall），改用純色']);
+  assert.deepStrictEqual(plain.console, ['warning: 這台瀏覽器解不開插畫（scene_carpet、scene_felt、scene_leather、scene_wood、scene_wall、prop_shoe、prop_emblem），改用純色']);
   assertSceneTone(art.lum, plain.lum);
   assertFeltColor(art.lum, plain.lum);
 });
 
-test('陽性對照：插畫原樣貼上不調亮度，要判成地毯太亮、木頭太暗', () => withCopy(TEXTURES,
-  'const TONE = { carpet: 0.75, wall: 1, leather: 2.8, wood: 3.7 };', 'const TONE = { carpet: 1, wall: 1, leather: 1, wood: 1 };', async tmp => {
+test('陽性對照：插畫原樣貼上不調亮度，要判成地毯與發牌盒太亮、木頭太暗', () => withCopy(TEXTURES,
+  'const TONE = { carpet: 0.75, wall: 1, leather: 2.8, wood: 3.7, shoe: 0.7 };', 'const TONE = { carpet: 1, wall: 1, leather: 1, wood: 1, shoe: 1 };', async tmp => {
     const [art, plain] = [await sceneLum(tmp), await plainLum()];
+    assert.throws(() => assertSceneTone(art.lum, pick(plain.lum, '發牌盒')), /發牌盒 比 canvas 版亮/);
     assert.throws(() => assertSceneTone(art.lum, pick(plain.lum, '地毯')), /地毯 比 canvas 版亮/);
     assert.throws(() => assertSceneTone(art.lum, pick(plain.lum, '桌身木頭')), /桌身木頭 比 canvas 版暗太多/);
   }));
