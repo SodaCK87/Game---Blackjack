@@ -124,12 +124,25 @@ function connect(wsUrl) {
   });
 }
 
+// 靜音：Edge 無頭模式不理 --mute-audio，真的點過一下（check_sfx 的 CDP 點擊）喇叭就會響（使用者 2026-11-19 跑全套時聽到）。
+// 真的 AudioContext 的 destination 換成一個音量 0 的 GainNode 再接到喇叭；OfflineAudioContext 不受影響，音效測試照樣離線量波形
+const MUTE = `(() => {
+  const AC = window.AudioContext, base = window.BaseAudioContext && Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'destination');
+  if (!AC || !base) return;
+  const muted = new WeakMap();
+  Object.defineProperty(AC.prototype, 'destination', { configurable: true, get() {
+    if (!muted.has(this)) { const g = this.createGain(); g.gain.value = 0; g.connect(base.get.call(this)); muted.set(this, g); }
+    return muted.get(this);
+  } });
+})();`;
+
 // size：CSS 像素；mobile：照手機模擬（觸控、device pixel ratio 2，iPhone 那種 3 用 dpr 給）；init：每次載入時比頁面自己的 script 先跑的程式碼
 async function withPage(browser, { size = [1280, 720], mobile = false, init = '', dpr = mobile ? 2 : 1 } = {}, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_PREFIX));
   const marker = path.basename(dir);
   const args = ['--headless=new', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
-    '--disable-extensions', '--disable-sync', '--remote-debugging-port=0', 'about:blank'];
+    // 靜音（Chrome 有用；Edge 無頭不理，另外靠下面的 MUTE）
+    '--disable-extensions', '--disable-sync', '--mute-audio', '--remote-debugging-port=0', 'about:blank'];
   // Edge 會先把自己重新啟動一次，拿到的 pid 只是 launcher
   if (browser === 'edge') args.unshift('--edge-skip-compat-layer-relaunch');
   const proc = spawn(CANDIDATES[browser], args, { stdio: 'ignore' });
@@ -169,6 +182,7 @@ async function withPage(browser, { size = [1280, 720], mobile = false, init = ''
     await client.send('Page.addScriptToEvaluateOnNewDocument', {
       source: 'window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;',
     });
+    await client.send('Page.addScriptToEvaluateOnNewDocument', { source: MUTE });
     if (init) await client.send('Page.addScriptToEvaluateOnNewDocument', { source: init });
     await client.send('Emulation.setDeviceMetricsOverride', {
       width: size[0], height: size[1], deviceScaleFactor: dpr, mobile,
